@@ -1,15 +1,20 @@
 import uvicorn
 import requests
 import re
-import sqlite3
+import os
+import psycopg2
 from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# --- CONFIGURAÇÕES ---
 TOKEN = "8533795323:AAE3pbZwZGi9LAMHAxSSeWltcOjyKoMm5WY"
 ADMIN_USER = "Youngbae"
 ADMIN_PASS = "72163427"
+
+# Pega o link do banco das Variáveis de Ambiente (Configuraremos isso no Render)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 app = FastAPI()
 
@@ -21,12 +26,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- MODELOS DE DADOS ---
+# --- MODELOS ---
 class TransactionCreate(BaseModel):
     description: str
     amount: float
     category: str
-    date: str  # Formato YYYY-MM-DD
+    date: str
 
 class InvestmentCreate(BaseModel):
     asset: str
@@ -46,15 +51,44 @@ class LoginData(BaseModel):
     username: str
     password: str
 
-def init_db():
-    conn = sqlite3.connect('finance.db')
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, amount REAL NOT NULL, date TEXT, category TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS investments (id INTEGER PRIMARY KEY AUTOINCREMENT, asset TEXT NOT NULL, amount REAL NOT NULL, date TEXT)''')
-    conn.commit()
-    conn.close()
+# --- CONEXÃO COM O BANCO ---
+def get_db_connection():
+    if not DATABASE_URL:
+        raise Exception("DATABASE_URL não configurada!")
+    return psycopg2.connect(DATABASE_URL)
 
-init_db()
+def init_db():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # PostgreSQL usa SERIAL para auto-incremento
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS transactions (
+                id SERIAL PRIMARY KEY,
+                description TEXT NOT NULL,
+                amount REAL NOT NULL,
+                date TEXT,
+                category TEXT
+            );
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS investments (
+                id SERIAL PRIMARY KEY,
+                asset TEXT NOT NULL,
+                amount REAL NOT NULL,
+                date TEXT
+            );
+        ''')
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("Banco de Dados Conectado e Inicializado!")
+    except Exception as e:
+        print(f"Erro ao conectar no DB: {e}")
+
+# Inicializa ao ligar (apenas se tiver URL)
+if DATABASE_URL:
+    init_db()
 
 def enviar_mensagem(chat_id, texto):
     try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": chat_id, "text": texto})
@@ -78,20 +112,23 @@ def login(data: LoginData):
 @app.get("/dashboard")
 def get_dashboard(month: str = None):
     if not month: month = datetime.now().strftime("%Y-%m")
-    conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
     
-    # Buscas
-    cursor.execute("SELECT * FROM transactions WHERE date LIKE ? ORDER BY date DESC, id DESC", (f"{month}%",))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Postgres usa %s em vez de ?
+    cursor.execute("SELECT * FROM transactions WHERE date LIKE %s ORDER BY date DESC, id DESC", (f"{month}%",))
     transactions = [{"id": r[0], "description": r[1], "amount": r[2], "date": r[3], "category": r[4]} for r in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM investments WHERE date LIKE ? ORDER BY date DESC, id DESC", (f"{month}%",))
+    cursor.execute("SELECT * FROM investments WHERE date LIKE %s ORDER BY date DESC, id DESC", (f"{month}%",))
     investments_month = [{"id": r[0], "asset": r[1], "amount": r[2], "date": r[3]} for r in cursor.fetchall()]
 
     cursor.execute("SELECT * FROM investments")
     investments_global = [{"id": r[0], "amount": r[2]} for r in cursor.fetchall()]
+    
+    cursor.close()
     conn.close()
     
-    # Cálculos
     ganhos = sum(t["amount"] for t in transactions if t["amount"] > 0)
     gastos = sum(t["amount"] for t in transactions if t["amount"] < 0)
     investido_mes = sum(i["amount"] for i in investments_month)
@@ -115,43 +152,49 @@ def get_dashboard(month: str = None):
         "current_month": month
     }
 
-# --- ROTAS DE CRIAÇÃO MANUAL (NOVAS) ---
+# --- CRIAÇÃO MANUAL ---
 @app.post("/transactions")
 def create_transaction(t: TransactionCreate):
-    conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
-    cursor.execute("INSERT INTO transactions (description, amount, category, date) VALUES (?, ?, ?, ?)", 
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO transactions (description, amount, category, date) VALUES (%s, %s, %s, %s)", 
                    (t.description, t.amount, t.category, t.date))
-    conn.commit(); conn.close()
+    conn.commit(); cursor.close(); conn.close()
     return {"status": "created"}
 
 @app.post("/investments")
 def create_investment(i: InvestmentCreate):
-    conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
-    cursor.execute("INSERT INTO investments (asset, amount, date) VALUES (?, ?, ?)", 
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO investments (asset, amount, date) VALUES (%s, %s, %s)", 
                    (i.asset, i.amount, i.date))
-    conn.commit(); conn.close()
+    conn.commit(); cursor.close(); conn.close()
     return {"status": "created"}
 
 # --- UPDATE E DELETE ---
 @app.put("/transactions/{item_id}")
 def update_transaction(item_id: int, t: TransactionUpdate):
-    conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
-    cursor.execute("UPDATE transactions SET description = ?, amount = ?, category = ? WHERE id = ?", (t.description, t.amount, t.category, item_id))
-    conn.commit(); conn.close(); return {"status": "updated"}
+    conn = get_db_connection(); cursor = conn.cursor()
+    cursor.execute("UPDATE transactions SET description = %s, amount = %s, category = %s WHERE id = %s", (t.description, t.amount, t.category, item_id))
+    conn.commit(); cursor.close(); conn.close(); return {"status": "updated"}
 
 @app.put("/investments/{item_id}")
 def update_investment(item_id: int, i: InvestmentUpdate):
-    conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
-    cursor.execute("UPDATE investments SET asset = ?, amount = ? WHERE id = ?", (i.asset, i.amount, item_id))
-    conn.commit(); conn.close(); return {"status": "updated"}
+    conn = get_db_connection(); cursor = conn.cursor()
+    cursor.execute("UPDATE investments SET asset = %s, amount = %s WHERE id = %s", (i.asset, i.amount, item_id))
+    conn.commit(); cursor.close(); conn.close(); return {"status": "updated"}
 
 @app.delete("/transactions/{item_id}")
 def delete_transaction(item_id: int):
-    conn = sqlite3.connect('finance.db'); cursor = conn.cursor(); cursor.execute("DELETE FROM transactions WHERE id = ?", (item_id,)); conn.commit(); conn.close(); return {"status": "deleted"}
+    conn = get_db_connection(); cursor = conn.cursor()
+    cursor.execute("DELETE FROM transactions WHERE id = %s", (item_id,))
+    conn.commit(); cursor.close(); conn.close(); return {"status": "deleted"}
 
 @app.delete("/investments/{item_id}")
 def delete_investment(item_id: int):
-    conn = sqlite3.connect('finance.db'); cursor = conn.cursor(); cursor.execute("DELETE FROM investments WHERE id = ?", (item_id,)); conn.commit(); conn.close(); return {"status": "deleted"}
+    conn = get_db_connection(); cursor = conn.cursor()
+    cursor.execute("DELETE FROM investments WHERE id = %s", (item_id,))
+    conn.commit(); cursor.close(); conn.close(); return {"status": "deleted"}
 
 # --- TELEGRAM ---
 @app.post("/webhook")
@@ -164,19 +207,26 @@ async def receber_telegram(request: Request):
         if match:
             valor = float(match.group())
             data_hoje = datetime.now().strftime("%Y-%m-%d")
-            conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
-            if any(x in texto.lower() for x in ["investi", "aporte", "compra"]):
-                cursor.execute("INSERT INTO investments (asset, amount, date) VALUES (?, ?, ?)", (texto, valor, data_hoje))
-                msg = f"📈 Investimento: {texto}"
-            else:
-                eh_lucro = any(x in texto.lower() for x in ["recebi", "ganhei", "pix", "entrada"])
-                valor_final = valor if eh_lucro else -valor
-                cat = detectar_categoria(texto)
-                cursor.execute("INSERT INTO transactions (description, amount, date, category) VALUES (?, ?, ?, ?)", (texto, valor_final, data_hoje, cat))
-                msg = f"{'🚀' if eh_lucro else '💸'} {cat}: {texto}"
-            conn.commit(); conn.close()
-            enviar_mensagem(chat_id, msg)
+            
+            try:
+                conn = get_db_connection(); cursor = conn.cursor()
+                if any(x in texto.lower() for x in ["investi", "aporte", "compra"]):
+                    cursor.execute("INSERT INTO investments (asset, amount, date) VALUES (%s, %s, %s)", (texto, valor, data_hoje))
+                    msg = f"📈 Investimento: {texto}"
+                else:
+                    eh_lucro = any(x in texto.lower() for x in ["recebi", "ganhei", "pix", "entrada"])
+                    valor_final = valor if eh_lucro else -valor
+                    cat = detectar_categoria(texto)
+                    cursor.execute("INSERT INTO transactions (description, amount, date, category) VALUES (%s, %s, %s, %s)", (texto, valor_final, data_hoje, cat))
+                    msg = f"{'🚀' if eh_lucro else '💸'} {cat}: {texto}"
+                conn.commit(); cursor.close(); conn.close()
+                enviar_mensagem(chat_id, msg)
+            except Exception as e:
+                enviar_mensagem(chat_id, "Erro no Banco de Dados ⚠️")
+                print(e)
     return {"ok": True}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Pega a porta do Render ou usa 8000 localmente
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
