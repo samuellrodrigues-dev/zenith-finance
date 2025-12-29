@@ -1,29 +1,15 @@
-# backend/main.py
-from fastapi import FastAPI, Depends, Request
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from database import Base, engine, SessionLocal, Transaction
+import uvicorn
+import requests
 import re
-import httpx # Biblioteca para falar com o Telegram
-import os
-from dotenv import load_dotenv
-load_dotenv() # Carrega as variáveis do arquivo .env
+import sqlite3
+from datetime import datetime
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-# Pega o token do arquivo .env (se não achar, avisa o erro)
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-
-if not TELEGRAM_TOKEN:
-    raise ValueError("ERRO: O Token do Telegram não foi encontrado no arquivo .env")
-
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-
-# --- CONFIGURAÇÃO DO TELEGRAM ---
-# Cole o token que o BotFather te deu aqui entre aspas!
-TELEGRAM_TOKEN = "tokensecreto" 
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-
-# Cria as tabelas
-Base.metadata.create_all(bind=engine)
+TOKEN = "8533795323:AAE3pbZwZGi9LAMHAxSSeWltcOjyKoMm5WY"
+ADMIN_USER = "Youngbae"
+ADMIN_PASS = "72163427"
 
 app = FastAPI()
 
@@ -35,100 +21,162 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# --- MODELOS DE DADOS ---
+class TransactionCreate(BaseModel):
+    description: str
+    amount: float
+    category: str
+    date: str  # Formato YYYY-MM-DD
 
-# --- Lógica de Inteligência (Mantivemos a mesma!) ---
-def process_text_to_transaction(text: str):
-    text = text.lower()
-    match = re.search(r'(\d+[,.]?\d*)', text)
-    if not match:
-        return None
-    
-    amount_str = match.group(1).replace(',', '.')
-    amount = float(amount_str)
-    
-    if any(word in text for word in ['gastei', 'paguei', 'compra', 'saída', 'perdi', 'mercado', 'uber', 'ifood']):
-        type_ = 'despesa'
-        amount = -abs(amount)
-    elif any(word in text for word in ['recebi', 'ganhei', 'salário', 'pix', 'entrada']):
-        type_ = 'receita'
-        amount = abs(amount)
-    else:
-        type_ = 'despesa'
-        amount = -abs(amount)
+class InvestmentCreate(BaseModel):
+    asset: str
+    amount: float
+    date: str
 
-    clean_desc = text.replace(match.group(1), '').replace('reais', '').replace('no', '').replace('na', '').strip()
-    for word in ['gastei', 'paguei', 'recebi', 'ganhei']:
-        clean_desc = clean_desc.replace(word, '').strip()
+class TransactionUpdate(BaseModel):
+    description: str
+    amount: float
+    category: str
 
-    if not clean_desc:
-        clean_desc = "Transação sem descrição"
+class InvestmentUpdate(BaseModel):
+    asset: str
+    amount: float
 
-    return {
-        "description": clean_desc.title(),
-        "amount": amount,
-        "category": "Telegram",
-        "type": type_
-    }
+class LoginData(BaseModel):
+    username: str
+    password: str
 
-# Função auxiliar para enviar resposta ao Telegram
-async def send_telegram_message(chat_id: int, text: str):
-    async with httpx.AsyncClient() as client:
-        await client.post(f"{TELEGRAM_API_URL}/sendMessage", json={
-            "chat_id": chat_id,
-            "text": text
-        })
+def init_db():
+    conn = sqlite3.connect('finance.db')
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, amount REAL NOT NULL, date TEXT, category TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS investments (id INTEGER PRIMARY KEY AUTOINCREMENT, asset TEXT NOT NULL, amount REAL NOT NULL, date TEXT)''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def enviar_mensagem(chat_id, texto):
+    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": chat_id, "text": texto})
+    except: pass
+
+def detectar_categoria(texto):
+    texto = texto.lower()
+    if any(x in texto for x in ["uber", "99", "gasolina", "estacionamento", "onibus", "metro"]): return "Transporte"
+    if any(x in texto for x in ["pizza", "ifood", "restaurante", "mercado", "lanche", "almoco", "jantar"]): return "Alimentação"
+    if any(x in texto for x in ["luz", "agua", "internet", "aluguel", "condominio"]): return "Casa"
+    if any(x in texto for x in ["cinema", "jogo", "viagem", "netflix", "spotify"]): return "Lazer"
+    if any(x in texto for x in ["salario", "freela", "venda", "pix"]): return "Renda"
+    return "Outros"
+
+@app.post("/login")
+def login(data: LoginData):
+    if data.username == ADMIN_USER and data.password == ADMIN_PASS:
+        return {"status": "success", "token": "acesso_liberado"}
+    raise HTTPException(status_code=401, detail="Negado")
 
 @app.get("/dashboard")
-def get_dashboard(db: Session = Depends(get_db)):
-    transactions = db.query(Transaction).all()
-    total_balance = sum(t.amount for t in transactions)
-    total_expenses = sum(abs(t.amount) for t in transactions if t.amount < 0)
-    return {"balance": total_balance, "expenses": total_expenses, "transactions": transactions[::-1]}
-
-@app.delete("/transactions/{transaction_id}")
-def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
-    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
-    if not transaction:
-        return {"error": "Não encontrado"}
-    db.delete(transaction)
-    db.commit()
-    return {"status": "Deletado"}
-
-# --- ROTA WEBHOOK DO TELEGRAM ---
-@app.post("/webhook")
-async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
-    try:
-        data = await request.json() # Telegram manda JSON, não Form
-        
-        # Verifica se é uma mensagem de texto válida
-        if "message" in data and "text" in data["message"]:
-            chat_id = data["message"]["chat"]["id"]
-            text = data["message"]["text"]
-            user_name = data["message"]["from"].get("first_name", "Comandante")
-
-            print(f"📩 Telegram de {user_name}: {text}")
-
-            # Processa a transação
-            transaction_data = process_text_to_transaction(text)
-            
-            if transaction_data:
-                db_transaction = Transaction(**transaction_data)
-                db.add(db_transaction)
-                db.commit()
-                msg = f"✅ Feito, {user_name}! R$ {transaction_data['amount']} ({transaction_data['description']}) salvo."
-            else:
-                msg = "🤖 Não entendi o valor. Tente: 'Gastei 50 no Uber'"
-
-            # Envia a resposta de volta
-            await send_telegram_message(chat_id, msg)
-            
-    except Exception as e:
-        print(f"Erro no webhook: {e}")
+def get_dashboard(month: str = None):
+    if not month: month = datetime.now().strftime("%Y-%m")
+    conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
     
-    return {"status": "ok"}
+    # Buscas
+    cursor.execute("SELECT * FROM transactions WHERE date LIKE ? ORDER BY date DESC, id DESC", (f"{month}%",))
+    transactions = [{"id": r[0], "description": r[1], "amount": r[2], "date": r[3], "category": r[4]} for r in cursor.fetchall()]
+    
+    cursor.execute("SELECT * FROM investments WHERE date LIKE ? ORDER BY date DESC, id DESC", (f"{month}%",))
+    investments_month = [{"id": r[0], "asset": r[1], "amount": r[2], "date": r[3]} for r in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM investments")
+    investments_global = [{"id": r[0], "amount": r[2]} for r in cursor.fetchall()]
+    conn.close()
+    
+    # Cálculos
+    ganhos = sum(t["amount"] for t in transactions if t["amount"] > 0)
+    gastos = sum(t["amount"] for t in transactions if t["amount"] < 0)
+    investido_mes = sum(i["amount"] for i in investments_month)
+    investido_global = sum(i["amount"] for i in investments_global)
+    
+    cats = {}
+    if investido_mes > 0: cats["Investimentos"] = investido_mes
+    for t in transactions:
+        if t["amount"] < 0:
+            c = t["category"]
+            cats[c] = cats.get(c, 0) + abs(t["amount"])
+
+    return {
+        "balance": ganhos + gastos - investido_mes,
+        "expenses": gastos,
+        "invested_month": investido_mes,
+        "invested_global": investido_global,
+        "transactions": transactions,
+        "investments": investments_month,
+        "categories": cats,
+        "current_month": month
+    }
+
+# --- ROTAS DE CRIAÇÃO MANUAL (NOVAS) ---
+@app.post("/transactions")
+def create_transaction(t: TransactionCreate):
+    conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
+    cursor.execute("INSERT INTO transactions (description, amount, category, date) VALUES (?, ?, ?, ?)", 
+                   (t.description, t.amount, t.category, t.date))
+    conn.commit(); conn.close()
+    return {"status": "created"}
+
+@app.post("/investments")
+def create_investment(i: InvestmentCreate):
+    conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
+    cursor.execute("INSERT INTO investments (asset, amount, date) VALUES (?, ?, ?)", 
+                   (i.asset, i.amount, i.date))
+    conn.commit(); conn.close()
+    return {"status": "created"}
+
+# --- UPDATE E DELETE ---
+@app.put("/transactions/{item_id}")
+def update_transaction(item_id: int, t: TransactionUpdate):
+    conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
+    cursor.execute("UPDATE transactions SET description = ?, amount = ?, category = ? WHERE id = ?", (t.description, t.amount, t.category, item_id))
+    conn.commit(); conn.close(); return {"status": "updated"}
+
+@app.put("/investments/{item_id}")
+def update_investment(item_id: int, i: InvestmentUpdate):
+    conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
+    cursor.execute("UPDATE investments SET asset = ?, amount = ? WHERE id = ?", (i.asset, i.amount, item_id))
+    conn.commit(); conn.close(); return {"status": "updated"}
+
+@app.delete("/transactions/{item_id}")
+def delete_transaction(item_id: int):
+    conn = sqlite3.connect('finance.db'); cursor = conn.cursor(); cursor.execute("DELETE FROM transactions WHERE id = ?", (item_id,)); conn.commit(); conn.close(); return {"status": "deleted"}
+
+@app.delete("/investments/{item_id}")
+def delete_investment(item_id: int):
+    conn = sqlite3.connect('finance.db'); cursor = conn.cursor(); cursor.execute("DELETE FROM investments WHERE id = ?", (item_id,)); conn.commit(); conn.close(); return {"status": "deleted"}
+
+# --- TELEGRAM ---
+@app.post("/webhook")
+async def receber_telegram(request: Request):
+    data = await request.json()
+    if "message" in data:
+        chat_id = data["message"]["chat"]["id"]
+        texto = data["message"].get("text", "")
+        match = re.search(r'\d+(\.\d+)?', texto.replace(',', '.'))
+        if match:
+            valor = float(match.group())
+            data_hoje = datetime.now().strftime("%Y-%m-%d")
+            conn = sqlite3.connect('finance.db'); cursor = conn.cursor()
+            if any(x in texto.lower() for x in ["investi", "aporte", "compra"]):
+                cursor.execute("INSERT INTO investments (asset, amount, date) VALUES (?, ?, ?)", (texto, valor, data_hoje))
+                msg = f"📈 Investimento: {texto}"
+            else:
+                eh_lucro = any(x in texto.lower() for x in ["recebi", "ganhei", "pix", "entrada"])
+                valor_final = valor if eh_lucro else -valor
+                cat = detectar_categoria(texto)
+                cursor.execute("INSERT INTO transactions (description, amount, date, category) VALUES (?, ?, ?, ?)", (texto, valor_final, data_hoje, cat))
+                msg = f"{'🚀' if eh_lucro else '💸'} {cat}: {texto}"
+            conn.commit(); conn.close()
+            enviar_mensagem(chat_id, msg)
+    return {"ok": True}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
