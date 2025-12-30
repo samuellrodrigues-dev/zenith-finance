@@ -3,17 +3,30 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
-# --- CORREÇÃO DE SEGURANÇA ---
-# Tenta pegar a URL. Se vier Vazia ou None, usa o SQLite local de emergência.
+# 1. Tenta pegar a URL do ambiente
 db_url = os.getenv("DATABASE_URL")
-if not db_url:
-    db_url = "sqlite:///./finance.db"
 
-# Correção extra: O Render as vezes usa "postgres://" mas o Python quer "postgresql://"
+# 2. Limpeza: Se for None ou Vazio, define como None real
+if db_url and not db_url.strip():
+    db_url = None
+
+# 3. Correção para Postgres no Render (se existir)
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
-engine = create_engine(db_url)
+# 4. TENTATIVA DE CONEXÃO BLINDADA
+try:
+    if not db_url:
+        raise ValueError("URL vazia")
+    # Tenta criar a engine com a URL oficial
+    engine = create_engine(db_url)
+    print(f"✅ Conectado no banco oficial: {db_url.split('://')[0]}...")
+except Exception as e:
+    # SE DER QUALQUER ERRO, USA O SQLITE LOCAL
+    print(f"⚠️ Erro na conexão ({e}). Usando SQLite local de emergência.")
+    db_url = "sqlite:///./finance.db"
+    engine = create_engine(db_url, connect_args={"check_same_thread": False})
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
