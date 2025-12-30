@@ -165,9 +165,11 @@ def get_dashboard(month: str = None):
     if not month: month = datetime.now().strftime("%Y-%m")
     conn = get_db_connection(); cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM transactions WHERE date LIKE %s ORDER BY date DESC, id DESC", (f"{month}%",))
-    transactions = [{"id": r[0], "description": r[1], "amount": r[2], "date": r[3], "category": r[4]} for r in cursor.fetchall()]
+    # MUDANÇA AQUI: transactions -> transactions_v2
+    cursor.execute("SELECT * FROM transactions_v2 WHERE date LIKE %s ORDER BY date DESC, id DESC", (f"{month}%",))
+    transactions = [{"id": r[0], "description": r[1], "amount": r[2], "category": r[3], "type": r[4], "date": r[5]} for r in cursor.fetchall()]
     
+    # Investimentos continuam na tabela normal por enquanto
     cursor.execute("SELECT * FROM investments WHERE date LIKE %s ORDER BY date DESC, id DESC", (f"{month}%",))
     investments_month = [{"id": r[0], "asset": r[1], "amount": r[2], "date": r[3]} for r in cursor.fetchall()]
 
@@ -202,7 +204,8 @@ def get_dashboard(month: str = None):
 @app.post("/transactions")
 def create_transaction(t: TransactionCreate):
     conn = get_db_connection(); cursor = conn.cursor()
-    cursor.execute("INSERT INTO transactions (description, amount, category, date) VALUES (%s, %s, %s, %s)", (t.description, t.amount, t.category, t.date))
+    # MUDANÇA AQUI: transactions -> transactions_v2
+    cursor.execute("INSERT INTO transactions_v2 (description, amount, category, date) VALUES (%s, %s, %s, %s)", (t.description, t.amount, t.category, t.date))
     conn.commit(); cursor.close(); conn.close()
     return {"status": "created"}
 
@@ -216,7 +219,8 @@ def create_investment(i: InvestmentCreate):
 @app.put("/transactions/{item_id}")
 def update_transaction(item_id: int, t: TransactionUpdate):
     conn = get_db_connection(); cursor = conn.cursor()
-    cursor.execute("UPDATE transactions SET description = %s, amount = %s, category = %s WHERE id = %s", (t.description, t.amount, t.category, item_id))
+    # MUDANÇA AQUI: transactions -> transactions_v2
+    cursor.execute("UPDATE transactions_v2 SET description = %s, amount = %s, category = %s WHERE id = %s", (t.description, t.amount, t.category, item_id))
     conn.commit(); cursor.close(); conn.close(); return {"status": "updated"}
 
 @app.put("/investments/{item_id}")
@@ -228,7 +232,8 @@ def update_investment(item_id: int, i: InvestmentUpdate):
 @app.delete("/transactions/{item_id}")
 def delete_transaction(item_id: int):
     conn = get_db_connection(); cursor = conn.cursor()
-    cursor.execute("DELETE FROM transactions WHERE id = %s", (item_id,))
+    # MUDANÇA AQUI: transactions -> transactions_v2
+    cursor.execute("DELETE FROM transactions_v2 WHERE id = %s", (item_id,))
     conn.commit(); cursor.close(); conn.close(); return {"status": "deleted"}
 
 @app.delete("/investments/{item_id}")
