@@ -36,7 +36,7 @@ export default function Home() {
   const [editAmount, setEditAmount] = useState("");
   const [editCat, setEditCat] = useState("");
 
-  // AUXILIAR: Formata data YYYY-MM (Respeitando fuso local para o input)
+  // AUXILIAR: Formata data YYYY-MM
   const getMonthStr = (date: Date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -47,7 +47,6 @@ export default function Home() {
   const fetchDashboard = async () => {
     try {
       if (!editingId && isAuthenticated) {
-        // Usa o getMonthStr para garantir o formato YYYY-MM correto na URL
         const response = await fetch(`https://zenith-finance-1.onrender.com/dashboard?month=${getMonthStr(currentDate)}`);
         const jsonData = await response.json();
         setData(jsonData);
@@ -65,7 +64,7 @@ export default function Home() {
     }
   }, [isAuthenticated, editingId, currentDate]);
 
-  // NAVEGAR NOS MESES (Setinhas)
+  // NAVEGAR NOS MESES
   const changeMonth = (offset: number) => {
     const newDate = new Date(currentDate);
     newDate.setMonth(newDate.getMonth() + offset);
@@ -73,11 +72,10 @@ export default function Home() {
     setLoading(true);
   };
 
-  // NAVEGAR PELO CALENDÁRIO (Input)
+  // NAVEGAR PELO CALENDÁRIO (Input Invisível)
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if(e.target.value) {
         const [year, month] = e.target.value.split('-');
-        // Cria a data no dia 1 do mês selecionado
         setCurrentDate(new Date(parseInt(year), parseInt(month) - 1, 1));
         setLoading(true);
     }
@@ -88,7 +86,6 @@ export default function Home() {
   // 1. CRIAR NOVO (Manual)
   const handleCreate = async (e: any) => {
     e.preventDefault();
-    // Define a data como o dia 01 do mês que está na tela (para inserção retroativa)
     const dateStr = `${getMonthStr(currentDate)}-01`; 
     
     try {
@@ -99,7 +96,6 @@ export default function Home() {
                 body: JSON.stringify({ asset: newItem.desc, amount: parseFloat(newItem.amount), date: dateStr })
             });
         } else {
-            // Se for Entrada, valor positivo. Se for Gasto, valor negativo.
             const amount = newItem.type === 'income' ? parseFloat(newItem.amount) : -parseFloat(newItem.amount);
             await fetch('https://zenith-finance-1.onrender.com/transactions', {
                 method: 'POST', 
@@ -146,10 +142,8 @@ export default function Home() {
     setEditingId(null); fetchDashboard();
   };
 
-  // TELA DE LOGIN (Se não autenticado)
   if (!isAuthenticated) return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
 
-  // DADOS DO GRÁFICO
   const chartData = {
     labels: Object.keys(data.categories),
     datasets: [{
@@ -163,7 +157,6 @@ export default function Home() {
     <main className="min-h-screen pl-64 font-sans bg-cyber-darkest text-white" style={{ fontFamily: 'var(--font-rajdhani)' }}>
       <Sidebar activeTab={activeTab} onNavigate={setActiveTab} />
       
-      {/* --- MODAL DE CRIAÇÃO (+ NOVO) --- */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
             <motion.div initial={{scale:0.9, opacity: 0}} animate={{scale:1, opacity: 1}} className="bg-cyber-dark p-8 rounded-2xl border border-cyber-blue w-96 shadow-[0_0_50px_rgba(0,243,255,0.2)]">
@@ -185,21 +178,14 @@ export default function Home() {
                         <label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">VALOR (R$)</label>
                         <input required type="number" step="0.01" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white focus:border-cyber-blue outline-none" value={newItem.amount} onChange={e=>setNewItem({...newItem, amount: e.target.value})} placeholder="0.00" />
                     </div>
-                    
                     {newItem.type === 'expense' && (
                         <div>
                             <label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">CATEGORIA</label>
                             <select className="w-full bg-black/50 border border-white/20 rounded p-3 text-white focus:border-cyber-blue outline-none" value={newItem.cat} onChange={e=>setNewItem({...newItem, cat: e.target.value})}>
-                                <option>Alimentação</option>
-                                <option>Transporte</option>
-                                <option>Casa</option>
-                                <option>Lazer</option>
-                                <option>Renda</option>
-                                <option>Outros</option>
+                                <option>Alimentação</option><option>Transporte</option><option>Casa</option><option>Lazer</option><option>Renda</option><option>Outros</option>
                             </select>
                         </div>
                     )}
-
                     <div className="flex gap-3 mt-8 pt-4 border-t border-white/10">
                         <button type="button" onClick={()=>setShowModal(false)} className="flex-1 py-3 rounded bg-white/5 hover:bg-white/10 text-gray-400 font-bold transition-colors">CANCELAR</button>
                         <button type="submit" className="flex-1 py-3 rounded bg-cyber-blue text-black font-bold hover:bg-cyan-300 transition-colors shadow-[0_0_15px_rgba(0,243,255,0.4)]">SALVAR</button>
@@ -218,39 +204,40 @@ export default function Home() {
                     {activeTab === 'dashboard' ? 'VISÃO GERAL' : activeTab === 'investments' ? 'CARTEIRA' : 'RELATÓRIOS'}
                 </h2>
                 
-                {/* --- AQUI ESTÁ A MUDANÇA: O SELETOR DE MÊS NOVO --- */}
-                <div className="flex items-center gap-2 mt-3 bg-white/5 p-1.5 rounded-lg border border-white/10 w-fit">
-                    <button onClick={() => changeMonth(-1)} className="p-2 hover:text-cyber-blue transition-colors hover:bg-white/5 rounded"><ChevronLeft size={20}/></button>
+                <div className="flex items-center gap-4 mt-2">
+                    <button onClick={() => changeMonth(-1)} className="p-1 hover:text-cyber-blue transition-colors"><ChevronLeft/></button>
                     
+                    {/* TRUQUE DO ESPELHO MÁGICO AQUI! */}
                     <div className="relative group">
-                         {/* Input type="month" permite escolher qualquer data no calendário */}
-                         <input 
+                        {/* 1. O Visual Bonito (Texto) */}
+                        <div className="flex items-center gap-2 text-cyber-blue font-mono text-lg border border-cyber-blue/30 px-4 py-1 rounded bg-cyber-blue/5 cursor-pointer hover:bg-cyber-blue/10 transition-colors">
+                            <Calendar size={18} />
+                            {currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase()}
+                        </div>
+
+                        {/* 2. O Input Invisível por cima (Funcionalidade) */}
+                        <input 
                             type="month" 
                             value={getMonthStr(currentDate)}
                             onChange={handleDateChange}
-                            className="bg-transparent text-cyber-blue font-mono text-xl uppercase focus:outline-none cursor-pointer border-none"
-                            style={{ colorScheme: 'dark' }} 
-                         />
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        />
                     </div>
 
-                    <button onClick={() => changeMonth(1)} className="p-2 hover:text-cyber-blue transition-colors hover:bg-white/5 rounded"><ChevronRight size={20}/></button>
+                    <button onClick={() => changeMonth(1)} className="p-1 hover:text-cyber-blue transition-colors"><ChevronRight/></button>
                 </div>
             </div>
             
             <div className="flex gap-4">
-                {/* BOTÃO + NOVO */}
                 <button onClick={()=>setShowModal(true)} className="flex items-center gap-2 px-6 py-2 bg-cyber-green/10 border border-cyber-green text-cyber-green rounded hover:bg-cyber-green hover:text-black transition-all duration-300 font-bold tracking-widest text-xs uppercase shadow-[0_0_15px_rgba(0,255,159,0.3)] hover:shadow-[0_0_25px_rgba(0,255,159,0.6)]">
                     <Plus size={16}/> NOVO
                 </button>
-                
-                {/* BOTÃO SINCRONIZAR */}
                 <button onClick={fetchDashboard} className="flex items-center gap-2 px-6 py-2 bg-cyber-blue/10 border border-cyber-blue text-cyber-blue rounded hover:bg-cyber-blue hover:text-black transition-all duration-300 font-bold tracking-widest text-xs uppercase shadow-[0_0_15px_rgba(0,243,255,0.3)] hover:shadow-[0_0_25px_rgba(0,243,255,0.6)]">
                     <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
                 </button>
             </div>
         </div>
 
-        {/* --- ABA DASHBOARD --- */}
         {activeTab === 'dashboard' && (
           <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -267,7 +254,6 @@ export default function Home() {
                 {data.transactions.length === 0 ? <div className="p-10 text-center text-gray-600">Nenhum registro encontrado neste mês.</div> : data.transactions.map((t: any) => (
                     <div key={t.id} className={`flex justify-between items-center p-4 border-b border-white/5 hover:bg-white/5 transition-colors ${editingId === t.id ? 'bg-cyber-blue/10' : ''}`}>
                         {editingId === t.id ? (
-                           // MODO EDIÇÃO (DASHBOARD)
                            <div className="flex w-full gap-2 items-center">
                                <input value={editDesc} onChange={e=>setEditDesc(e.target.value)} className="bg-black/50 border border-white/20 text-white px-3 py-1 rounded w-full"/>
                                <input value={editAmount} type="number" onChange={e=>setEditAmount(e.target.value)} className="bg-black/50 border border-white/20 text-white px-3 py-1 rounded w-32"/>
@@ -277,7 +263,6 @@ export default function Home() {
                                <button onClick={saveEdit} className="p-2 text-cyber-green hover:bg-cyber-green/20 rounded"><Save size={18}/></button>
                            </div>
                         ) : (
-                           // MODO VISUALIZAÇÃO (DASHBOARD)
                            <>
                             <div className="flex items-center gap-4">
                                 <div className="flex gap-2">
@@ -301,7 +286,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* --- ABA INVESTIMENTOS --- */}
         {activeTab === 'investments' && (
           <div className="space-y-8">
             <div className="p-8 rounded-2xl bg-gradient-to-r from-green-900/20 to-cyber-dark border border-green-500/30 flex items-center justify-between shadow-[0_0_30px_rgba(0,255,159,0.1)]">
@@ -313,7 +297,6 @@ export default function Home() {
                     {data.invested_month.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </div>
             </div>
-
             <div className="rounded-xl border border-white/10 bg-cyber-dark/40 backdrop-blur-md overflow-hidden">
                 <div className="p-6 border-b border-white/5 bg-white/5 flex justify-between items-center">
                     <h3 className="text-xl text-white font-bold tracking-wide flex items-center gap-2"><TrendingUp className="text-cyber-green"/> Ativos do Mês</h3>
@@ -322,14 +305,12 @@ export default function Home() {
                     {data.investments.length === 0 ? <div className="p-10 text-center text-gray-600">Nenhum aporte neste mês.</div> : data.investments.map((t: any) => (
                         <div key={t.id} className={`flex justify-between items-center p-4 border-b border-white/5 hover:bg-white/5 transition-colors ${editingId === t.id ? 'bg-cyber-blue/10' : ''}`}>
                             {editingId === t.id ? (
-                                // MODO EDIÇÃO (INVESTIMENTOS)
                                 <div className="flex w-full gap-2 items-center">
                                     <input value={editDesc} onChange={e=>setEditDesc(e.target.value)} className="bg-black/50 border border-white/20 text-white px-3 py-1 rounded w-full"/>
                                     <input value={editAmount} type="number" onChange={e=>setEditAmount(e.target.value)} className="bg-black/50 border border-white/20 text-white px-3 py-1 rounded w-32"/>
                                     <button onClick={saveEdit} className="p-2 text-cyber-green hover:bg-cyber-green/20 rounded"><Save size={18}/></button>
                                 </div>
                             ) : (
-                                // MODO VISUALIZAÇÃO (INVESTIMENTOS)
                                 <>
                                     <div className="flex items-center gap-4">
                                         <div className="flex gap-2">
@@ -350,7 +331,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* --- ABA RELATÓRIOS --- */}
         {activeTab === 'reports' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="p-8 rounded-2xl bg-cyber-dark/50 border border-white/10 flex flex-col items-center relative">
@@ -361,19 +341,15 @@ export default function Home() {
             </div>
           </div>
         )}
-
       </div>
     </main>
   );
 }
 
-// --- COMPONENTES VISUAIS (LOGIN & CARDS) ---
-
 function LoginPage({ onLogin }: any) { 
     const [user, setUser] = useState(""); 
     const [pass, setPass] = useState(""); 
     const [error, setError] = useState("");
-
     const handleLogin = async (e: any) => { 
         e.preventDefault(); 
         try { 
@@ -386,11 +362,9 @@ function LoginPage({ onLogin }: any) {
             else setError("ACESSO NEGADO: CREDENCIAIS INVÁLIDAS"); 
         } catch { setError("ERRO: SERVIDOR OFFLINE"); } 
     };
-
     return (
         <div className="min-h-screen bg-cyber-darkest flex items-center justify-center font-sans relative overflow-hidden">
             <div className="absolute inset-0 bg-[linear-gradient(rgba(0,243,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(0,243,255,0.05)_1px,transparent_1px)] bg-[size:50px_50px]" />
-            
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-cyber-dark p-10 rounded-2xl border border-cyber-blue/30 relative z-10 w-full max-w-md shadow-[0_0_60px_rgba(0,243,255,0.15)]">
                 <div className="flex justify-center mb-8">
                     <div className="w-20 h-20 bg-cyber-blue rounded-2xl flex items-center justify-center shadow-[0_0_25px_#00f3ff]">
@@ -399,7 +373,6 @@ function LoginPage({ onLogin }: any) {
                 </div>
                 <h2 className="text-3xl text-center font-bold text-white mb-2 font-orbitron tracking-widest">ZENITH SECURITY</h2>
                 <p className="text-center text-cyber-blue/60 font-mono text-xs mb-8">PROTOCOL v4.2 // AUTHENTICATION REQUIRED</p>
-                
                 <form onSubmit={handleLogin} className="space-y-6">
                     <div className="space-y-2">
                         <label className="text-xs text-cyber-blue font-bold tracking-widest ml-1">USUÁRIO</label>
@@ -429,7 +402,6 @@ function NeonCard({ icon, label, value, color }: any) {
     const colors: any = { blue: 'text-cyber-blue border-cyber-blue/50', red: 'text-cyber-red border-cyber-red/50', green: 'text-cyber-green border-cyber-green/50' }; 
     const textColors: any = { blue: 'text-cyber-blue', red: 'text-cyber-red', green: 'text-cyber-green' };
     const safeValue = value || 0; 
-    
     return (
         <div className={`p-6 rounded-xl bg-cyber-dark/80 border border-white/10 backdrop-blur-xl relative group hover:${colors[color]} transition-all duration-500`}>
             <div className={`absolute right-4 top-4 opacity-20 group-hover:opacity-100 transition-all duration-500 ${textColors[color]}`}>{icon}</div>
