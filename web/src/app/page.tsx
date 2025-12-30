@@ -36,13 +36,18 @@ export default function Home() {
   const [editAmount, setEditAmount] = useState("");
   const [editCat, setEditCat] = useState("");
 
-  // AUXILIAR: Formata data YYYY-MM
-  const getMonthStr = (date: Date) => date.toISOString().slice(0, 7);
+  // AUXILIAR: Formata data YYYY-MM (Respeitando fuso local para o input)
+  const getMonthStr = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
 
   // BUSCA DADOS
   const fetchDashboard = async () => {
     try {
       if (!editingId && isAuthenticated) {
+        // Usa o getMonthStr para garantir o formato YYYY-MM correto na URL
         const response = await fetch(`https://zenith-finance-1.onrender.com/dashboard?month=${getMonthStr(currentDate)}`);
         const jsonData = await response.json();
         setData(jsonData);
@@ -60,13 +65,23 @@ export default function Home() {
     }
   }, [isAuthenticated, editingId, currentDate]);
 
-  // NAVEGAR NOS MESES
+  // NAVEGAR NOS MESES (Setinhas)
   const changeMonth = (offset: number) => {
     const newDate = new Date(currentDate);
     newDate.setMonth(newDate.getMonth() + offset);
     setCurrentDate(newDate);
     setLoading(true);
   };
+
+  // NAVEGAR PELO CALENDÁRIO (Input)
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if(e.target.value) {
+        const [year, month] = e.target.value.split('-');
+        // Cria a data no dia 1 do mês selecionado
+        setCurrentDate(new Date(parseInt(year), parseInt(month) - 1, 1));
+        setLoading(true);
+    }
+  }
 
   // --- FUNÇÕES DE AÇÃO (CRIAR, EDITAR, DELETAR) ---
 
@@ -202,13 +217,23 @@ export default function Home() {
                 <h2 className="text-4xl font-bold text-white mb-1 tracking-wider font-orbitron">
                     {activeTab === 'dashboard' ? 'VISÃO GERAL' : activeTab === 'investments' ? 'CARTEIRA' : 'RELATÓRIOS'}
                 </h2>
-                <div className="flex items-center gap-4 mt-2">
-                    <button onClick={() => changeMonth(-1)} className="p-1 hover:text-cyber-blue transition-colors"><ChevronLeft/></button>
-                    <div className="flex items-center gap-2 text-cyber-blue font-mono text-lg border border-cyber-blue/30 px-4 py-1 rounded bg-cyber-blue/5">
-                        <Calendar size={18} />
-                        {currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase()}
+                
+                {/* --- AQUI ESTÁ A MUDANÇA: O SELETOR DE MÊS NOVO --- */}
+                <div className="flex items-center gap-2 mt-3 bg-white/5 p-1.5 rounded-lg border border-white/10 w-fit">
+                    <button onClick={() => changeMonth(-1)} className="p-2 hover:text-cyber-blue transition-colors hover:bg-white/5 rounded"><ChevronLeft size={20}/></button>
+                    
+                    <div className="relative group">
+                         {/* Input type="month" permite escolher qualquer data no calendário */}
+                         <input 
+                            type="month" 
+                            value={getMonthStr(currentDate)}
+                            onChange={handleDateChange}
+                            className="bg-transparent text-cyber-blue font-mono text-xl uppercase focus:outline-none cursor-pointer border-none"
+                            style={{ colorScheme: 'dark' }} 
+                         />
                     </div>
-                    <button onClick={() => changeMonth(1)} className="p-1 hover:text-cyber-blue transition-colors"><ChevronRight/></button>
+
+                    <button onClick={() => changeMonth(1)} className="p-2 hover:text-cyber-blue transition-colors hover:bg-white/5 rounded"><ChevronRight size={20}/></button>
                 </div>
             </div>
             
@@ -229,14 +254,14 @@ export default function Home() {
         {activeTab === 'dashboard' && (
           <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <NeonCard icon={<Wallet size={32} />} label="Saldo Líquido (Mês)" value={data.balance} color="blue" />
+              <NeonCard icon={<Wallet size={32} />} label={`Saldo Líquido (${currentDate.toLocaleDateString('pt-BR', {month:'long'})})`} value={data.balance} color="blue" />
               <NeonCard icon={<TrendingDown size={32} />} label="Gastos do Mês" value={data.expenses} color="red" />
               <NeonCard icon={<TrendingUp size={32} />} label="Total Investido (Global)" value={data.invested_global} color="green" />
             </div>
             
             <div className="rounded-xl border border-white/10 bg-cyber-dark/40 backdrop-blur-md overflow-hidden">
               <div className="p-6 border-b border-white/5 bg-white/5 flex justify-between items-center">
-                  <h3 className="text-xl text-white font-bold tracking-wide flex items-center gap-2"><Zap className="text-cyber-yellow"/> Transações do Mês</h3>
+                  <h3 className="text-xl text-white font-bold tracking-wide flex items-center gap-2"><Zap className="text-cyber-yellow"/> Transações de {currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</h3>
               </div>
               <div className="max-h-[400px] overflow-y-auto">
                 {data.transactions.length === 0 ? <div className="p-10 text-center text-gray-600">Nenhum registro encontrado neste mês.</div> : data.transactions.map((t: any) => (
@@ -264,8 +289,8 @@ export default function Home() {
                                     <span className="text-xs text-gray-500 bg-white/5 px-2 py-0.5 rounded border border-white/5 tracking-wider">{t.category} • {t.date}</span>
                                 </div>
                             </div>
-                            <span className={`text-xl font-bold font-mono ${t.amount < 0 ? 'text-cyber-red' : 'text-cyber-blue'}`}>
-                                {t.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            <span className={`text-xl font-bold font-mono ${t.type === 'receita' ? 'text-cyber-green' : 'text-cyber-red'}`}>
+                                {t.type === 'receita' ? '+' : ''} {t.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                             </span>
                            </>
                         )}
