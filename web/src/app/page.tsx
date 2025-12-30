@@ -1,6 +1,6 @@
 "use client";
 import Sidebar from "@/components/Sidebar";
-import { TrendingDown, Wallet, RefreshCw, Trash2, Zap, TrendingUp, Edit2, Save, X, Calendar, ChevronLeft, ChevronRight, Lock, Plus, User, Key, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { TrendingDown, Wallet, RefreshCw, Trash2, Zap, TrendingUp, Edit2, Save, X, Calendar, ChevronLeft, ChevronRight, Lock, Plus, User, Key, ArrowUpRight, ArrowDownRight, DollarSign } from 'lucide-react';
 import { useEffect, useState } from "react";
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { Doughnut } from 'react-chartjs-2';
@@ -17,8 +17,8 @@ export default function Home() {
   const [data, setData] = useState({ 
     balance: 0, 
     expenses: 0, 
-    invested_total: 0,     // Total investido (Custo)
-    portfolio_value: 0,    // Valor atual (Cotação)
+    invested_total: 0,     // Total investido (Custo Fixo)
+    portfolio_value: 0,    // Valor atual (Cotação Tempo Real)
     transactions: [], 
     investments: [], 
     categories: {} 
@@ -29,11 +29,17 @@ export default function Home() {
   const [showModal, setShowModal] = useState(false);
   const [newItem, setNewItem] = useState({ 
       type: 'expense', 
-      desc: '',        // Usado para Descrição OU Ticker
-      amount: '',      // Usado para Valor R$ OU Quantidade
-      price: '',       // Novo: Preço pago (só para investimentos)
+      desc: '',        
+      amount: '',      
+      price: '',       
       cat: 'Outros' 
   });
+
+  // ESTADOS DE EDIÇÃO
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editDesc, setEditDesc] = useState("");
+  const [editAmount, setEditAmount] = useState("");
+  const [editCat, setEditCat] = useState("");
 
   const getMonthStr = (date: Date) => {
     const year = date.getFullYear();
@@ -43,7 +49,7 @@ export default function Home() {
 
   const fetchDashboard = async () => {
     try {
-      if (isAuthenticated) {
+      if (!editingId && isAuthenticated) {
         const response = await fetch(`https://zenith-finance-1.onrender.com/dashboard?month=${getMonthStr(currentDate)}`);
         const jsonData = await response.json();
         setData(jsonData);
@@ -55,10 +61,10 @@ export default function Home() {
   useEffect(() => { 
     if(isAuthenticated) {
         fetchDashboard(); 
-        const interval = setInterval(fetchDashboard, 10000); // Atualiza a cada 10s (para cotações)
+        const interval = setInterval(fetchDashboard, 10000); 
         return () => clearInterval(interval);
     }
-  }, [isAuthenticated, currentDate]);
+  }, [isAuthenticated, editingId, currentDate]);
 
   const changeMonth = (offset: number) => {
     const newDate = new Date(currentDate);
@@ -81,19 +87,17 @@ export default function Home() {
     
     try {
         if (newItem.type === 'investment') {
-            // Lógica de Investimento (Ticker + Quantidade + Preço Pago)
             await fetch('https://zenith-finance-1.onrender.com/investments', {
                 method: 'POST', 
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ 
-                    ticker: newItem.desc,         // ex: BTC-USD
-                    quantity: parseFloat(newItem.amount), // ex: 0.5
-                    price: parseFloat(newItem.price || "0"), // ex: 50000
+                    ticker: newItem.desc,         
+                    quantity: parseFloat(newItem.amount), 
+                    price: parseFloat(newItem.price || "0"), 
                     date: dateStr 
                 })
             });
         } else {
-            // Lógica Normal (Transações)
             const amount = newItem.type === 'income' ? parseFloat(newItem.amount) : -parseFloat(newItem.amount);
             await fetch('https://zenith-finance-1.onrender.com/transactions', {
                 method: 'POST', 
@@ -115,7 +119,6 @@ export default function Home() {
 
   if (!isAuthenticated) return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
 
-  // Dados para o Gráfico
   const chartData = {
     labels: Object.keys(data.categories),
     datasets: [{
@@ -125,7 +128,6 @@ export default function Home() {
     }],
   };
 
-  // Cálculo de Lucro Total da Carteira
   const totalProfit = data.portfolio_value - data.invested_total;
   const isProfit = totalProfit >= 0;
 
@@ -151,8 +153,7 @@ export default function Home() {
                         <>
                              <div>
                                 <label className="text-xs text-cyber-green font-bold tracking-widest block mb-1">CÓDIGO (TICKER)</label>
-                                <input required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white focus:border-cyber-green outline-none uppercase" value={newItem.desc} onChange={e=>setNewItem({...newItem, desc: e.target.value.toUpperCase()})} placeholder="Ex: PETR4.SA, BTC-USD, AAPL" />
-                                <p className="text-[10px] text-gray-500 mt-1">*Use .SA para Brasil (ex: VALE3.SA)</p>
+                                <input required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white focus:border-cyber-green outline-none uppercase" value={newItem.desc} onChange={e=>setNewItem({...newItem, desc: e.target.value.toUpperCase()})} placeholder="Ex: PETR4.SA, BTC-USD" />
                             </div>
                             <div className="flex gap-2">
                                 <div>
@@ -232,7 +233,7 @@ export default function Home() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               <NeonCard icon={<Wallet size={32} />} label="Saldo Líquido (Conta)" value={data.balance} color="blue" />
               <NeonCard icon={<TrendingDown size={32} />} label="Gastos do Mês" value={data.expenses} color="red" />
-              <NeonCard icon={<TrendingUp size={32} />} label="Valor do Portfolio (Hoje)" value={data.portfolio_value} color="green" />
+              <NeonCard icon={<TrendingUp size={32} />} label="Patrimônio (Investimentos)" value={data.portfolio_value} color="green" />
             </div>
             
             <div className="rounded-xl border border-white/10 bg-cyber-dark/40 backdrop-blur-md overflow-hidden">
@@ -263,19 +264,40 @@ export default function Home() {
         {activeTab === 'investments' && (
           <div className="space-y-8">
             <div className={`p-8 rounded-2xl border flex items-center justify-between shadow-lg transition-colors duration-500 ${isProfit ? 'bg-green-900/10 border-green-500/30' : 'bg-red-900/10 border-red-500/30'}`}>
+                {/* LADO ESQUERDO: LUCRO E TOTAL INVESTIDO */}
                 <div>
-                    <h2 className="text-3xl font-bold text-white mb-2 tracking-wide">Patrimônio Total</h2>
-                    <div className="flex items-center gap-2 mt-2">
-                        <span className={`px-3 py-1 rounded text-xs font-bold tracking-widest ${isProfit ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                            {isProfit ? 'LUCRO' : 'PREJUÍZO'} TOTAL: {Math.abs(totalProfit).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        </span>
+                    <h2 className="text-2xl font-bold text-white mb-4 tracking-wide flex items-center gap-2">
+                        <Wallet className="text-cyber-blue"/> PERFORMANCE DA CARTEIRA
+                    </h2>
+                    
+                    <div className="flex items-center gap-8">
+                        <div>
+                            <p className="text-gray-400 text-[10px] font-bold tracking-widest uppercase mb-1">TOTAL INVESTIDO (FIXO)</p>
+                            <p className="text-2xl font-mono text-gray-300">
+                                {data.invested_total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </p>
+                        </div>
+
+                        <div className={`px-4 py-2 rounded border ${isProfit ? 'bg-green-500/10 border-green-500/50' : 'bg-red-500/10 border-red-500/50'}`}>
+                            <p className={`text-[10px] font-bold tracking-widest uppercase mb-1 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
+                                {isProfit ? 'LUCRO TOTAL' : 'PREJUÍZO TOTAL'}
+                            </p>
+                            <p className={`text-xl font-mono font-bold ${isProfit ? 'text-green-300' : 'text-red-300'}`}>
+                                {Math.abs(totalProfit).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </p>
+                        </div>
                     </div>
                 </div>
+
+                {/* LADO DIREITO: VALOR ATUAL (TEMPO REAL) */}
                 <div className="text-right">
-                    <div className="text-5xl font-bold text-white font-mono drop-shadow-md">
+                    <p className="text-cyber-blue text-xs font-bold tracking-widest uppercase mb-1 animate-pulse">VALOR ATUAL DE MERCADO</p>
+                    <div className="text-5xl font-bold text-white font-mono drop-shadow-[0_0_15px_rgba(0,243,255,0.3)]">
                         {data.portfolio_value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                     </div>
-                    <p className="text-gray-500 text-sm mt-1">Atualizado em Tempo Real</p>
+                    <p className="text-gray-500 text-[10px] mt-2 font-mono">
+                        ATUALIZADO AUTOMATICAMENTE VIA YAHOO FINANCE
+                    </p>
                 </div>
             </div>
 
@@ -284,26 +306,50 @@ export default function Home() {
                     <h3 className="text-xl text-white font-bold tracking-wide flex items-center gap-2"><TrendingUp className="text-cyber-green"/> Seus Ativos</h3>
                 </div>
                 <div className="max-h-[400px] overflow-y-auto">
-                    {data.investments.length === 0 ? <div className="p-10 text-center text-gray-600">Nenhum investimento cadastrado.</div> : data.investments.map((t: any) => (
-                        <div key={t.id} className="flex justify-between items-center p-4 border-b border-white/5 hover:bg-white/5 transition-colors">
-                            <div className="flex items-center gap-4">
-                                <button onClick={()=>deleteItem('investments', t.id)} className="p-2 bg-white/5 rounded text-gray-400 hover:bg-cyber-red hover:text-white transition-all"><Trash2 size={16}/></button>
-                                <div>
-                                    <span className="text-white font-bold block text-lg tracking-widest">{t.ticker}</span>
-                                    <span className="text-xs text-gray-500">{t.quantity} un • P. Médio: {t.purchase_price.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}</span>
+                    {/* PROTEÇÃO: Se não for array ou estiver vazio, mostra mensagem */}
+                    {!Array.isArray(data.investments) || data.investments.length === 0 ? (
+                        <div className="p-10 text-center text-gray-600">Nenhum investimento cadastrado.</div>
+                    ) : (
+                        data.investments.map((t: any) => {
+                             // Cálculo do custo total do ativo (Quantidade * Preço Pago)
+                             const totalCost = (t.quantity || 0) * (t.purchase_price || 0);
+                             
+                             return (
+                                <div key={t.id} className="flex justify-between items-center p-4 border-b border-white/5 hover:bg-white/5 transition-colors group">
+                                    <div className="flex items-center gap-4">
+                                        <button onClick={()=>deleteItem('investments', t.id)} className="p-2 bg-white/5 rounded text-gray-400 hover:bg-cyber-red hover:text-white transition-all"><Trash2 size={16}/></button>
+                                        
+                                        <div>
+                                            <span className="text-white font-bold block text-lg tracking-widest flex items-center gap-2">
+                                                {t.ticker} 
+                                                <span className="text-[10px] bg-white/10 px-2 rounded text-gray-400 font-normal">UN: {t.quantity}</span>
+                                            </span>
+                                            
+                                            {/* LINHA DE CUSTO (O QUE O USUÁRIO PEDIU) */}
+                                            <div className="flex gap-3 text-xs mt-1 font-mono">
+                                                <span className="text-gray-500">
+                                                    Médio: {t.purchase_price?.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}
+                                                </span>
+                                                <span className="text-gray-400 border-l border-gray-700 pl-3">
+                                                    Investido: {totalCost.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="text-right">
+                                        <span className="text-xl font-bold font-mono text-white block group-hover:text-cyber-blue transition-colors">
+                                            {(t.total_value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </span>
+                                        <span className={`text-xs font-bold flex items-center justify-end gap-1 ${(t.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                            {(t.profit || 0) >= 0 ? <ArrowUpRight size={12}/> : <ArrowDownRight size={12}/>}
+                                            {(t.profit || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </span>
+                                    </div>
                                 </div>
-                            </div>
-                            <div className="text-right">
-                                <span className="text-xl font-bold font-mono text-white block">
-                                    {t.total_value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                </span>
-                                <span className={`text-xs font-bold flex items-center justify-end gap-1 ${t.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                    {t.profit >= 0 ? <ArrowUpRight size={12}/> : <ArrowDownRight size={12}/>}
-                                    {t.profit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                </span>
-                            </div>
-                        </div>
-                    ))}
+                             )
+                        })
+                    )}
                 </div>
             </div>
           </div>
