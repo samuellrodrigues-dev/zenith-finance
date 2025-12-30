@@ -17,7 +17,7 @@ load_dotenv()
 
 # --- CONFIGURAÇÃO DO GEMINI IA ---
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.0-flash')
+mmodel = genai.GenerativeModel('gemini-flash-latest')
 
 def ask_ai(message):
     try:
