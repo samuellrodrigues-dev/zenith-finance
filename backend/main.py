@@ -1,12 +1,13 @@
 import os
 import requests
+import json
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware # <--- O que consertamos antes
+from pydantic import BaseModel # <--- O que estava faltando agora!
 from dotenv import load_dotenv
 from datetime import datetime
 from database import SessionLocal, Transaction
-import google.generativeai as genai # Import do Google
-import json
+import google.generativeai as genai
 
 load_dotenv()
 
