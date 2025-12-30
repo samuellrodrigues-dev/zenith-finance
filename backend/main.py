@@ -1,26 +1,26 @@
-import uvicorn
-import requests
-import re
 import os
-import google.generativeai as genai
-import json
+import requests
+from fastapi import FastAPI, Request
+from dotenv import load_dotenv
 from datetime import datetime
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from sqlalchemy import create_engine, text
-from dotenv import load_dotenv # <--- Importante
+from database import SessionLocal, Transaction
+import google.generativeai as genai # Import do Google
+import json
 
-# --- CARREGA O .ENV ---
-# Isso procura o arquivo .env e carrega as variáveis
 load_dotenv()
 
-# --- CONFIGURAÇÃO DO GEMINI IA ---
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-mmodel = genai.GenerativeModel('gemini-flash-latest')
+app = FastAPI()
 
+# --- CONFIGURAÇÃO DA IA ---
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+# A LINHA QUE ESTAVA FALTANDO OU NO LUGAR ERRADO:
+model = genai.GenerativeModel('gemini-flash-latest') 
+
+# --- FUNÇÃO QUE USA A IA ---
 def ask_ai(message):
     try:
+        # Aqui o código usa a variável 'model' que criamos ali em cima
         prompt = f"""
         Analise a seguinte mensagem de gasto financeiro: "{message}"
         Extraia:
@@ -31,7 +31,7 @@ def ask_ai(message):
         Responda APENAS um JSON neste formato, sem crase nem markdown:
         {{"amount": 0.0, "description": "...", "category": "..."}}
         """
-        response = model.generate_content(prompt)
+        response = model.generate_content(prompt) # <--- O erro acontecia aqui!
         return json.loads(response.text)
     except Exception as e:
         print(f"Erro na IA: {e}")
