@@ -43,7 +43,7 @@ export default function Home() {
   const fetchDashboard = async () => {
     try {
       if (!editingId && isAuthenticated) {
-        const response = await fetch(`http://127.0.0.1:8000/dashboard?month=${getMonthStr(currentDate)}`);
+        const response = await fetch(`https://zenith-finance-1.onrender.com/dashboard?month=${getMonthStr(currentDate)}`);
         const jsonData = await response.json();
         setData(jsonData);
         setLoading(false);
@@ -78,7 +78,7 @@ export default function Home() {
     
     try {
         if (newItem.type === 'investment') {
-            await fetch('http://127.0.0.1:8000/investments', {
+            await fetch('https://zenith-finance-1.onrender.com/investments', {
                 method: 'POST', 
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ asset: newItem.desc, amount: parseFloat(newItem.amount), date: dateStr })
@@ -86,7 +86,7 @@ export default function Home() {
         } else {
             // Se for Entrada, valor positivo. Se for Gasto, valor negativo.
             const amount = newItem.type === 'income' ? parseFloat(newItem.amount) : -parseFloat(newItem.amount);
-            await fetch('http://127.0.0.1:8000/transactions', {
+            await fetch('https://zenith-finance-1.onrender.com/transactions', {
                 method: 'POST', 
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ description: newItem.desc, amount, category: newItem.cat, date: dateStr })
@@ -101,7 +101,7 @@ export default function Home() {
   // 2. DELETAR
   const deleteItem = async (type: string, id: number) => {
     if (!confirm("Deletar registro?")) return;
-    await fetch(`http://127.0.0.1:8000/${type}/${id}`, { method: 'DELETE' });
+    await fetch(`https://zenith-finance-1.onrender.com/${type}/${id}`, { method: 'DELETE' });
     fetchDashboard();
   };
 
@@ -123,7 +123,7 @@ export default function Home() {
         ? { asset: editDesc, amount: parseFloat(editAmount) } 
         : { description: editDesc, amount: parseFloat(editAmount), category: editCat };
 
-    await fetch(`http://127.0.0.1:8000/${endpoint}/${editingId}`, { 
+    await fetch(`https://zenith-finance-1.onrender.com/${endpoint}/${editingId}`, { 
         method: 'PUT', 
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify(body) 
@@ -352,7 +352,7 @@ function LoginPage({ onLogin }: any) {
     const handleLogin = async (e: any) => { 
         e.preventDefault(); 
         try { 
-            const res = await fetch('http://127.0.0.1:8000/login', { 
+            const res = await fetch('https://zenith-finance-1.onrender.com/login', { 
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json' }, 
                 body: JSON.stringify({ username: user, password: pass }) 
