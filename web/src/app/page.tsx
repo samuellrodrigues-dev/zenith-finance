@@ -1,6 +1,11 @@
 "use client";
+
 import Sidebar from "@/components/Sidebar";
-import { TrendingDown, Wallet, RefreshCw, Trash2, Zap, TrendingUp, Edit2, Save, X, Calendar, ChevronLeft, ChevronRight, Lock, Plus, User, Key, ArrowUpRight, ArrowDownRight, DollarSign } from 'lucide-react';
+import { 
+  TrendingDown, Wallet, RefreshCw, Trash2, Zap, TrendingUp, 
+  Edit2, Save, X, Calendar, ChevronLeft, ChevronRight, Lock, 
+  Plus, User, Key, ArrowUpRight, ArrowDownRight 
+} from 'lucide-react';
 import { useEffect, useState } from "react";
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { Doughnut } from 'react-chartjs-2';
@@ -9,23 +14,24 @@ import { motion } from "framer-motion";
 ChartJS.register(ArcElement, Tooltip, Legend);
 
 export default function Home() {
+  // --- ESTADOS GERAIS ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [currentDate, setCurrentDate] = useState(new Date()); 
   
-  // DADOS COM ESTRUTURA NOVA
+  // --- DADOS DO SISTEMA ---
   const [data, setData] = useState({ 
     balance: 0, 
     expenses: 0, 
-    invested_total: 0,     // Total investido (Custo Fixo)
-    portfolio_value: 0,    // Valor atual (Cotação Tempo Real)
+    invested_total: 0,     // Custo Fixo
+    portfolio_value: 0,    // Valor em Tempo Real
     transactions: [], 
     investments: [], 
     categories: {} 
   });
   const [loading, setLoading] = useState(true);
 
-  // MODAL NOVO
+  // --- MODAL DE CRIAÇÃO ---
   const [showModal, setShowModal] = useState(false);
   const [newItem, setNewItem] = useState({ 
       type: 'expense', 
@@ -35,18 +41,21 @@ export default function Home() {
       cat: 'Outros' 
   });
 
-  // ESTADOS DE EDIÇÃO
+  // --- ESTADOS DE EDIÇÃO (RESTITUÍDOS) ---
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editDesc, setEditDesc] = useState("");
-  const [editAmount, setEditAmount] = useState("");
-  const [editCat, setEditCat] = useState("");
+  const [editDesc, setEditDesc] = useState("");     // Serve para Descrição ou Ticker
+  const [editAmount, setEditAmount] = useState(""); // Serve para Valor ou Quantidade
+  const [editPrice, setEditPrice] = useState("");   // Novo: Preço Pago (Só Investimentos)
+  const [editCat, setEditCat] = useState("");       // Categoria (Só Transações)
 
+  // --- AUXILIARES ---
   const getMonthStr = (date: Date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     return `${year}-${month}`;
   };
 
+  // --- BUSCA DE DADOS ---
   const fetchDashboard = async () => {
     try {
       if (!editingId && isAuthenticated) {
@@ -58,14 +67,16 @@ export default function Home() {
     } catch (error) { console.error(error); }
   };
 
+  // --- AUTO-REFRESH (TEMPO REAL) ---
   useEffect(() => { 
     if(isAuthenticated) {
         fetchDashboard(); 
-        const interval = setInterval(fetchDashboard, 10000); 
+        const interval = setInterval(fetchDashboard, 10000); // 10 segundos para o Yahoo Finance
         return () => clearInterval(interval);
     }
   }, [isAuthenticated, editingId, currentDate]);
 
+  // --- NAVEGAÇÃO DE DATA ---
   const changeMonth = (offset: number) => {
     const newDate = new Date(currentDate);
     newDate.setMonth(newDate.getMonth() + offset);
@@ -81,6 +92,9 @@ export default function Home() {
     }
   }
 
+  // --- AÇÕES DO SISTEMA (CRUD) ---
+
+  // 1. CRIAR NOVO
   const handleCreate = async (e: any) => {
     e.preventDefault();
     const dateStr = `${getMonthStr(currentDate)}-01`; 
@@ -111,14 +125,70 @@ export default function Home() {
     } catch (error) { alert("Erro ao salvar."); }
   };
 
+  // 2. DELETAR
   const deleteItem = async (type: string, id: number) => {
     if (!confirm("Deletar registro?")) return;
     await fetch(`https://zenith-finance-1.onrender.com/${type}/${id}`, { method: 'DELETE' });
     fetchDashboard();
   };
 
+  // 3. INICIAR EDIÇÃO (Lógica Inteligente)
+  const startEditing = (item: any, type: string) => {
+    setEditingId(item.id); 
+    
+    if (type === 'investments') {
+        // Preenche dados de investimento
+        setEditDesc(item.ticker);
+        setEditAmount(item.quantity.toString());
+        setEditPrice((item.purchase_price || 0).toString());
+    } else {
+        // Preenche dados de transação
+        setEditDesc(item.description);
+        setEditAmount(item.amount.toString());
+        setEditCat(item.category || "Outros");
+    }
+  };
+
+  // 4. SALVAR EDIÇÃO
+  const saveEdit = async () => {
+    if (!editingId) return;
+    
+    const isInvest = activeTab === 'investments';
+    const endpoint = isInvest ? 'investments' : 'transactions';
+    
+    // Cria o corpo da requisição dependendo do tipo
+    let body;
+    if (isInvest) {
+        body = { 
+            ticker: editDesc, 
+            quantity: parseFloat(editAmount), 
+            price: parseFloat(editPrice) 
+        };
+    } else {
+        body = { 
+            description: editDesc, 
+            amount: parseFloat(editAmount), 
+            category: editCat 
+        };
+    }
+
+    try {
+        await fetch(`https://zenith-finance-1.onrender.com/${endpoint}/${editingId}`, { 
+            method: 'PUT', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(body) 
+        });
+        setEditingId(null); 
+        fetchDashboard();
+    } catch (error) {
+        alert("Erro ao editar.");
+    }
+  };
+
+  // --- PROTEÇÃO DE LOGIN ---
   if (!isAuthenticated) return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
 
+  // --- DADOS GRÁFICOS ---
   const chartData = {
     labels: Object.keys(data.categories),
     datasets: [{
@@ -135,6 +205,7 @@ export default function Home() {
     <main className="min-h-screen pl-64 font-sans bg-cyber-darkest text-white" style={{ fontFamily: 'var(--font-rajdhani)' }}>
       <Sidebar activeTab={activeTab} onNavigate={setActiveTab} />
       
+      {/* --- MODAL --- */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
             <motion.div initial={{scale:0.9, opacity: 0}} animate={{scale:1, opacity: 1}} className="bg-cyber-dark p-8 rounded-2xl border border-cyber-blue w-96 shadow-[0_0_50px_rgba(0,243,255,0.2)]">
@@ -198,7 +269,7 @@ export default function Home() {
 
       <div className="p-10 max-w-7xl mx-auto space-y-8">
         
-        {/* HEADER */}
+        {/* HEADER PRINCIPAL */}
         <div className="flex justify-between items-end border-b border-white/5 pb-6">
             <div>
                 <h2 className="text-4xl font-bold text-white mb-1 tracking-wider font-orbitron">
@@ -242,17 +313,35 @@ export default function Home() {
               </div>
               <div className="max-h-[400px] overflow-y-auto">
                 {data.transactions.length === 0 ? <div className="p-10 text-center text-gray-600">Nenhum registro encontrado.</div> : data.transactions.map((t: any) => (
-                    <div key={t.id} className="flex justify-between items-center p-4 border-b border-white/5 hover:bg-white/5 transition-colors">
-                        <div className="flex items-center gap-4">
-                            <button onClick={()=>deleteItem('transactions', t.id)} className="p-2 bg-white/5 rounded text-gray-400 hover:bg-cyber-red hover:text-white transition-all"><Trash2 size={16}/></button>
-                            <div>
-                                <span className="text-white font-bold block text-lg">{t.description}</span>
-                                <span className="text-xs text-gray-500 bg-white/5 px-2 py-0.5 rounded border border-white/5 tracking-wider">{t.category} • {t.date}</span>
+                    <div key={t.id} className={`flex justify-between items-center p-4 border-b border-white/5 hover:bg-white/5 transition-colors ${editingId === t.id ? 'bg-cyber-blue/10' : ''}`}>
+                        {editingId === t.id ? (
+                           // MODO EDIÇÃO (DASHBOARD)
+                           <div className="flex w-full gap-2 items-center">
+                               <input value={editDesc} onChange={e=>setEditDesc(e.target.value)} className="bg-black/50 border border-white/20 text-white px-3 py-1 rounded w-full"/>
+                               <input value={editAmount} type="number" onChange={e=>setEditAmount(e.target.value)} className="bg-black/50 border border-white/20 text-white px-3 py-1 rounded w-32"/>
+                               <select value={editCat} onChange={e=>setEditCat(e.target.value)} className="bg-black/50 border border-white/20 text-white px-3 py-1 rounded">
+                                   <option>Alimentação</option><option>Transporte</option><option>Casa</option><option>Lazer</option><option>Renda</option><option>Outros</option>
+                               </select>
+                               <button onClick={saveEdit} className="p-2 text-cyber-green hover:bg-cyber-green/20 rounded"><Save size={18}/></button>
+                           </div>
+                        ) : (
+                           // MODO VISUALIZAÇÃO (DASHBOARD)
+                           <>
+                            <div className="flex items-center gap-4">
+                                <div className="flex gap-2">
+                                    <button onClick={()=>deleteItem('transactions', t.id)} className="p-2 bg-white/5 rounded text-gray-400 hover:bg-cyber-red hover:text-white transition-all"><Trash2 size={16}/></button>
+                                    <button onClick={()=>startEditing(t, 'transactions')} className="p-2 bg-white/5 rounded text-gray-400 hover:bg-cyber-blue hover:text-white transition-all"><Edit2 size={16}/></button>
+                                </div>
+                                <div>
+                                    <span className="text-white font-bold block text-lg">{t.description}</span>
+                                    <span className="text-xs text-gray-500 bg-white/5 px-2 py-0.5 rounded border border-white/5 tracking-wider">{t.category} • {t.date}</span>
+                                </div>
                             </div>
-                        </div>
-                        <span className={`text-xl font-bold font-mono ${t.type === 'receita' ? 'text-cyber-green' : 'text-cyber-red'}`}>
-                            {t.type === 'receita' ? '+' : ''} {t.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        </span>
+                            <span className={`text-xl font-bold font-mono ${t.type === 'receita' ? 'text-cyber-green' : 'text-cyber-red'}`}>
+                                {t.type === 'receita' ? '+' : ''} {t.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </span>
+                           </>
+                        )}
                     </div>
                 ))}
               </div>
@@ -264,15 +353,15 @@ export default function Home() {
         {activeTab === 'investments' && (
           <div className="space-y-8">
             <div className={`p-8 rounded-2xl border flex items-center justify-between shadow-lg transition-colors duration-500 ${isProfit ? 'bg-green-900/10 border-green-500/30' : 'bg-red-900/10 border-red-500/30'}`}>
-                {/* LADO ESQUERDO: LUCRO E TOTAL INVESTIDO */}
+                {/* CARD DE PERFORMANCE */}
                 <div>
                     <h2 className="text-2xl font-bold text-white mb-4 tracking-wide flex items-center gap-2">
-                        <Wallet className="text-cyber-blue"/> PERFORMANCE DA CARTEIRA
+                        <Wallet className="text-cyber-blue"/> PERFORMANCE
                     </h2>
                     
                     <div className="flex items-center gap-8">
                         <div>
-                            <p className="text-gray-400 text-[10px] font-bold tracking-widest uppercase mb-1">TOTAL INVESTIDO (FIXO)</p>
+                            <p className="text-gray-400 text-[10px] font-bold tracking-widest uppercase mb-1">CUSTO TOTAL</p>
                             <p className="text-2xl font-mono text-gray-300">
                                 {data.invested_total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                             </p>
@@ -280,7 +369,7 @@ export default function Home() {
 
                         <div className={`px-4 py-2 rounded border ${isProfit ? 'bg-green-500/10 border-green-500/50' : 'bg-red-500/10 border-red-500/50'}`}>
                             <p className={`text-[10px] font-bold tracking-widest uppercase mb-1 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
-                                {isProfit ? 'LUCRO TOTAL' : 'PREJUÍZO TOTAL'}
+                                {isProfit ? 'LUCRO' : 'PREJUÍZO'}
                             </p>
                             <p className={`text-xl font-mono font-bold ${isProfit ? 'text-green-300' : 'text-red-300'}`}>
                                 {Math.abs(totalProfit).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
@@ -289,14 +378,13 @@ export default function Home() {
                     </div>
                 </div>
 
-                {/* LADO DIREITO: VALOR ATUAL (TEMPO REAL) */}
                 <div className="text-right">
-                    <p className="text-cyber-blue text-xs font-bold tracking-widest uppercase mb-1 animate-pulse">VALOR ATUAL DE MERCADO</p>
+                    <p className="text-cyber-blue text-xs font-bold tracking-widest uppercase mb-1 animate-pulse">VALOR ATUAL</p>
                     <div className="text-5xl font-bold text-white font-mono drop-shadow-[0_0_15px_rgba(0,243,255,0.3)]">
                         {data.portfolio_value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                     </div>
                     <p className="text-gray-500 text-[10px] mt-2 font-mono">
-                        ATUALIZADO AUTOMATICAMENTE VIA YAHOO FINANCE
+                        YAHOO FINANCE LIVE
                     </p>
                 </div>
             </div>
@@ -306,49 +394,58 @@ export default function Home() {
                     <h3 className="text-xl text-white font-bold tracking-wide flex items-center gap-2"><TrendingUp className="text-cyber-green"/> Seus Ativos</h3>
                 </div>
                 <div className="max-h-[400px] overflow-y-auto">
-                    {/* PROTEÇÃO: Se não for array ou estiver vazio, mostra mensagem */}
                     {!Array.isArray(data.investments) || data.investments.length === 0 ? (
                         <div className="p-10 text-center text-gray-600">Nenhum investimento cadastrado.</div>
                     ) : (
-                        data.investments.map((t: any) => {
-                             // Cálculo do custo total do ativo (Quantidade * Preço Pago)
-                             const totalCost = (t.quantity || 0) * (t.purchase_price || 0);
-                             
-                             return (
-                                <div key={t.id} className="flex justify-between items-center p-4 border-b border-white/5 hover:bg-white/5 transition-colors group">
-                                    <div className="flex items-center gap-4">
-                                        <button onClick={()=>deleteItem('investments', t.id)} className="p-2 bg-white/5 rounded text-gray-400 hover:bg-cyber-red hover:text-white transition-all"><Trash2 size={16}/></button>
-                                        
-                                        <div>
-                                            <span className="text-white font-bold block text-lg tracking-widest flex items-center gap-2">
-                                                {t.ticker} 
-                                                <span className="text-[10px] bg-white/10 px-2 rounded text-gray-400 font-normal">UN: {t.quantity}</span>
-                                            </span>
+                        data.investments.map((t: any) => (
+                             <div key={t.id} className={`flex justify-between items-center p-4 border-b border-white/5 hover:bg-white/5 transition-colors ${editingId === t.id ? 'bg-cyber-blue/10' : ''}`}>
+                                {editingId === t.id ? (
+                                    // MODO EDIÇÃO (INVESTIMENTOS V2)
+                                    <div className="flex w-full gap-2 items-center">
+                                        <input value={editDesc} onChange={e=>setEditDesc(e.target.value.toUpperCase())} className="bg-black/50 border border-white/20 text-white px-3 py-1 rounded w-32 font-mono uppercase" placeholder="Ticker"/>
+                                        <input value={editAmount} type="number" onChange={e=>setEditAmount(e.target.value)} className="bg-black/50 border border-white/20 text-white px-3 py-1 rounded w-24" placeholder="Qtd"/>
+                                        <input value={editPrice} type="number" onChange={e=>setEditPrice(e.target.value)} className="bg-black/50 border border-white/20 text-white px-3 py-1 rounded w-24" placeholder="Preço"/>
+                                        <button onClick={saveEdit} className="p-2 text-cyber-green hover:bg-cyber-green/20 rounded"><Save size={18}/></button>
+                                    </div>
+                                ) : (
+                                    // MODO VISUALIZAÇÃO (INVESTIMENTOS V2)
+                                    <>
+                                        <div className="flex items-center gap-4">
+                                            <div className="flex gap-2">
+                                                <button onClick={()=>deleteItem('investments', t.id)} className="p-2 bg-white/5 rounded text-gray-400 hover:bg-cyber-red hover:text-white transition-all"><Trash2 size={16}/></button>
+                                                <button onClick={()=>startEditing(t, 'investments')} className="p-2 bg-white/5 rounded text-gray-400 hover:bg-cyber-blue hover:text-white transition-all"><Edit2 size={16}/></button>
+                                            </div>
                                             
-                                            {/* LINHA DE CUSTO (O QUE O USUÁRIO PEDIU) */}
-                                            <div className="flex gap-3 text-xs mt-1 font-mono">
-                                                <span className="text-gray-500">
-                                                    Médio: {t.purchase_price?.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}
+                                            <div>
+                                                <span className="text-white font-bold block text-lg tracking-widest flex items-center gap-2">
+                                                    {t.ticker} 
+                                                    <span className="text-[10px] bg-white/10 px-2 rounded text-gray-400 font-normal">UN: {t.quantity}</span>
                                                 </span>
-                                                <span className="text-gray-400 border-l border-gray-700 pl-3">
-                                                    Investido: {totalCost.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}
-                                                </span>
+                                                
+                                                <div className="flex gap-3 text-xs mt-1 font-mono">
+                                                    <span className="text-gray-500">
+                                                        Médio: {t.purchase_price?.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}
+                                                    </span>
+                                                    <span className="text-gray-400 border-l border-gray-700 pl-3">
+                                                        Investido: {((t.quantity||0)*(t.purchase_price||0)).toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                    
-                                    <div className="text-right">
-                                        <span className="text-xl font-bold font-mono text-white block group-hover:text-cyber-blue transition-colors">
-                                            {(t.total_value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                        </span>
-                                        <span className={`text-xs font-bold flex items-center justify-end gap-1 ${(t.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                            {(t.profit || 0) >= 0 ? <ArrowUpRight size={12}/> : <ArrowDownRight size={12}/>}
-                                            {(t.profit || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                        </span>
-                                    </div>
-                                </div>
-                             )
-                        })
+                                        
+                                        <div className="text-right">
+                                            <span className="text-xl font-bold font-mono text-white block group-hover:text-cyber-blue transition-colors">
+                                                {(t.total_value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                            </span>
+                                            <span className={`text-xs font-bold flex items-center justify-end gap-1 ${(t.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                {(t.profit || 0) >= 0 ? <ArrowUpRight size={12}/> : <ArrowDownRight size={12}/>}
+                                                {(t.profit || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                            </span>
+                                        </div>
+                                    </>
+                                )}
+                             </div>
+                        ))
                     )}
                 </div>
             </div>
@@ -371,10 +468,13 @@ export default function Home() {
   );
 }
 
+// --- COMPONENTES VISUAIS (EXPANDIDOS) ---
+
 function LoginPage({ onLogin }: any) { 
     const [user, setUser] = useState(""); 
     const [pass, setPass] = useState(""); 
     const [error, setError] = useState("");
+
     const handleLogin = async (e: any) => { 
         e.preventDefault(); 
         try { 
@@ -383,21 +483,45 @@ function LoginPage({ onLogin }: any) {
                 headers: { 'Content-Type': 'application/json' }, 
                 body: JSON.stringify({ username: user, password: pass }) 
             }); 
-            if (res.ok) onLogin(); else setError("ACESSO NEGADO"); 
+            if (res.ok) onLogin(); 
+            else setError("ACESSO NEGADO: CREDENCIAIS INVÁLIDAS"); 
         } catch { setError("ERRO: SERVIDOR OFFLINE"); } 
     };
+
     return (
-        <div className="min-h-screen bg-cyber-darkest flex items-center justify-center font-sans">
-            <div className="bg-cyber-dark p-10 rounded-2xl border border-cyber-blue/30 w-full max-w-md shadow-lg">
-                <div className="flex justify-center mb-8"><div className="w-20 h-20 bg-cyber-blue rounded-2xl flex items-center justify-center shadow-md"><Lock size={40} className="text-black" /></div></div>
-                <h2 className="text-3xl text-center font-bold text-white mb-8 font-orbitron tracking-widest">ZENITH SECURITY</h2>
+        <div className="min-h-screen bg-cyber-darkest flex items-center justify-center font-sans relative overflow-hidden">
+            <div className="absolute inset-0 bg-[linear-gradient(rgba(0,243,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(0,243,255,0.05)_1px,transparent_1px)] bg-[size:50px_50px]" />
+            
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-cyber-dark p-10 rounded-2xl border border-cyber-blue/30 relative z-10 w-full max-w-md shadow-[0_0_60px_rgba(0,243,255,0.15)]">
+                <div className="flex justify-center mb-8">
+                    <div className="w-20 h-20 bg-cyber-blue rounded-2xl flex items-center justify-center shadow-[0_0_25px_#00f3ff]">
+                        <Lock size={40} className="text-black" />
+                    </div>
+                </div>
+                <h2 className="text-3xl text-center font-bold text-white mb-2 font-orbitron tracking-widest">ZENITH SECURITY</h2>
+                <p className="text-center text-cyber-blue/60 font-mono text-xs mb-8">PROTOCOL v4.2 // AUTHENTICATION REQUIRED</p>
+                
                 <form onSubmit={handleLogin} className="space-y-6">
-                    <input type="text" value={user} onChange={e=>setUser(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-lg py-3 px-4 text-white focus:outline-none focus:border-cyber-blue" placeholder="Usuário" />
-                    <input type="password" value={pass} onChange={e=>setPass(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-lg py-3 px-4 text-white focus:outline-none focus:border-cyber-blue" placeholder="Senha" />
-                    {error && <p className="text-red-500 text-center text-xs font-bold">{error}</p>}
-                    <button className="w-full bg-cyber-blue/10 border border-cyber-blue text-cyber-blue py-3 rounded-lg hover:bg-cyber-blue hover:text-black transition-all font-bold">AUTENTICAR</button>
+                    <div className="space-y-2">
+                        <label className="text-xs text-cyber-blue font-bold tracking-widest ml-1">USUÁRIO</label>
+                        <div className="relative">
+                            <User className="absolute left-3 top-3 text-cyber-blue/50" size={18} />
+                            <input type="text" value={user} onChange={e=>setUser(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-lg py-3 pl-10 text-white focus:outline-none focus:border-cyber-blue transition-colors font-mono" placeholder="Identificação" />
+                        </div>
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-xs text-cyber-blue font-bold tracking-widest ml-1">SENHA</label>
+                        <div className="relative">
+                            <Key className="absolute left-3 top-3 text-cyber-blue/50" size={18} />
+                            <input type="password" value={pass} onChange={e=>setPass(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-lg py-3 pl-10 text-white focus:outline-none focus:border-cyber-blue transition-colors font-mono" placeholder="••••••••" />
+                        </div>
+                    </div>
+                    {error && <p className="text-cyber-red text-center text-xs font-bold animate-pulse bg-cyber-red/10 p-2 rounded">{error}</p>}
+                    <button className="w-full bg-cyber-blue/10 border border-cyber-blue text-cyber-blue py-3 rounded-lg hover:bg-cyber-blue hover:text-black transition-all duration-300 font-bold tracking-widest shadow-[0_0_15px_rgba(0,243,255,0.2)]">
+                        AUTENTICAR
+                    </button>
                 </form>
-            </div>
+            </motion.div>
         </div>
     );
 }
@@ -406,6 +530,7 @@ function NeonCard({ icon, label, value, color }: any) {
     const colors: any = { blue: 'text-cyber-blue border-cyber-blue/50', red: 'text-cyber-red border-cyber-red/50', green: 'text-cyber-green border-cyber-green/50' }; 
     const textColors: any = { blue: 'text-cyber-blue', red: 'text-cyber-red', green: 'text-cyber-green' };
     const safeValue = value || 0; 
+    
     return (
         <div className={`p-6 rounded-xl bg-cyber-dark/80 border border-white/10 backdrop-blur-xl relative group hover:${colors[color]} transition-all duration-500`}>
             <div className={`absolute right-4 top-4 opacity-20 group-hover:opacity-100 transition-all duration-500 ${textColors[color]}`}>{icon}</div>
