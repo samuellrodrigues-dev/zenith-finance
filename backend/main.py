@@ -2,6 +2,8 @@ import uvicorn
 import requests
 import re
 import os
+import google.generativeai as genai
+import json
 from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +14,28 @@ from dotenv import load_dotenv # <--- Importante
 # --- CARREGA O .ENV ---
 # Isso procura o arquivo .env e carrega as variáveis
 load_dotenv()
+
+# --- CONFIGURAÇÃO DO GEMINI IA ---
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel('gemini-pro')
+
+def ask_ai(message):
+    try:
+        prompt = f"""
+        Analise a seguinte mensagem de gasto financeiro: "{message}"
+        Extraia:
+        1. O valor (numérico, use ponto para decimais).
+        2. Uma descrição curta (ex: "Almoço", "Uber").
+        3. A categoria (Escolha uma: Alimentação, Transporte, Lazer, Casa, Contas, Investimento, Saúde, Outros).
+        
+        Responda APENAS um JSON neste formato, sem crase nem markdown:
+        {{"amount": 0.0, "description": "...", "category": "..."}}
+        """
+        response = model.generate_content(prompt)
+        return json.loads(response.text)
+    except Exception as e:
+        print(f"Erro na IA: {e}")
+        return None
 
 # --- DIAGNÓSTICO (Aparece no terminal ao iniciar) ---
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -210,30 +234,46 @@ def delete_investment(item_id: int):
     conn.commit(); cursor.close(); conn.close(); return {"status": "deleted"}
 
 @app.post("/webhook")
-async def receber_telegram(request: Request):
-    data = await request.json()
-    if "message" in data:
-        chat_id = data["message"]["chat"]["id"]
-        texto = data["message"].get("text", "")
-        match = re.search(r'\d+(\.\d+)?', texto.replace(',', '.'))
-        if match:
-            valor = float(match.group())
-            data_hoje = datetime.now().strftime("%Y-%m-%d")
-            try:
-                conn = get_db_connection(); cursor = conn.cursor()
-                if any(x in texto.lower() for x in ["investi", "aporte", "compra"]):
-                    cursor.execute("INSERT INTO investments (asset, amount, date) VALUES (%s, %s, %s)", (texto, valor, data_hoje))
-                    msg = f"📈 Investimento: {texto}"
-                else:
-                    eh_lucro = any(x in texto.lower() for x in ["recebi", "ganhei", "pix", "entrada"])
-                    valor_final = valor if eh_lucro else -valor
-                    cat = detectar_categoria(texto)
-                    cursor.execute("INSERT INTO transactions (description, amount, date, category) VALUES (%s, %s, %s, %s)", (texto, valor_final, data_hoje, cat))
-                    msg = f"{'🚀' if eh_lucro else '💸'} {cat}: {texto}"
-                conn.commit(); cursor.close(); conn.close()
-                enviar_mensagem(chat_id, msg)
-            except Exception: pass
-    return {"ok": True}
+async def telegram_webhook(request: Request):
+    try:
+        data = await request.json()
+        # Pega a mensagem do Telegram (se existir)
+        message = data.get("message", {}).get("text", "")
+        chat_id = data.get("message", {}).get("chat", {}).get("id")
+
+        if not message or not chat_id:
+            return {"status": "ignored"}
+
+        # --- AQUI A MÁGICA ACONTECE! ---
+        print(f"Mensagem recebida: {message}")
+        ai_result = ask_ai(message) # Pergunta pro Gemini
+
+        if ai_result:
+            # Se a IA entendeu, salvamos no banco!
+            new_transaction = Transaction(
+                description=ai_result['description'],
+                amount=float(ai_result['amount']) * -1, # Negativo pois é gasto
+                category=ai_result['category'],
+                date=datetime.now().strftime("%Y-%m-%d")
+            )
+            
+            db = SessionLocal()
+            db.add(new_transaction)
+            db.commit()
+            db.close()
+
+            # Responde pro usuário no Telegram
+            resposta = f"✅ Anotado!\n📝 {ai_result['description']}\n💰 R$ {ai_result['amount']}\n📂 {ai_result['category']}"
+            requests.post(f"https://api.telegram.org/bot{os.getenv('TOKEN')}/sendMessage", json={"chat_id": chat_id, "text": resposta})
+        else:
+            # Se a IA não entendeu
+            requests.post(f"https://api.telegram.org/bot{os.getenv('TOKEN')}/sendMessage", json={"chat_id": chat_id, "text": "🤔 Não entendi o valor. Tente 'Gastei 50 em pizza'"})
+
+        return {"status": "ok"}
+        
+    except Exception as e:
+        print(f"Erro no webhook: {e}")
+        return {"status": "error"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
