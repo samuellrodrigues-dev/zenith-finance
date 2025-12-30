@@ -2,25 +2,40 @@ import uvicorn
 import requests
 import re
 import os
-import psycopg2
 from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import create_engine, text
+from dotenv import load_dotenv # <--- Importante
+
+# --- CARREGA O .ENV ---
+# Isso procura o arquivo .env e carrega as variáveis
+load_dotenv()
+
+# --- DIAGNÓSTICO (Aparece no terminal ao iniciar) ---
+DATABASE_URL = os.getenv("DATABASE_URL")
+print(f"📂 Diretório atual: {os.getcwd()}")
+if os.path.exists(".env"):
+    print("✅ Arquivo .env ENCONTRADO!")
+else:
+    print("❌ Arquivo .env NÃO encontrado! Verifique se ele está na pasta 'backend'.")
+
+if DATABASE_URL:
+    print(f"🔗 Banco configurado: {DATABASE_URL.split('@')[0]}... (senha oculta)")
+else:
+    print("⚠️ DATABASE_URL está VAZIA ou não foi lida!")
 
 # --- CONFIGURAÇÕES ---
 TOKEN = "8533795323:AAE3pbZwZGi9LAMHAxSSeWltcOjyKoMm5WY"
 ADMIN_USER = "Youngbae"
 ADMIN_PASS = "72163427"
 
-# Pega o link do banco das Variáveis de Ambiente (Configuraremos isso no Render)
-DATABASE_URL = os.getenv("DATABASE_URL")
-
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,17 +69,20 @@ class LoginData(BaseModel):
 # --- CONEXÃO COM O BANCO ---
 def get_db_connection():
     if not DATABASE_URL:
-        raise Exception("DATABASE_URL não configurada!")
-    return psycopg2.connect(DATABASE_URL)
+        # Se falhar, tenta fallback para SQLite para não travar o app (Modo de Segurança)
+        print("⚠️ Usando SQLite de emergência pois o MySQL não foi configurado.")
+        return create_engine("sqlite:///./fallback.db").raw_connection()
+    
+    engine = create_engine(DATABASE_URL)
+    return engine.raw_connection()
 
 def init_db():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # PostgreSQL usa SERIAL para auto-incremento
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS transactions (
-                id SERIAL PRIMARY KEY,
+                id INT AUTO_INCREMENT PRIMARY KEY,
                 description TEXT NOT NULL,
                 amount REAL NOT NULL,
                 date TEXT,
@@ -73,7 +91,7 @@ def init_db():
         ''')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS investments (
-                id SERIAL PRIMARY KEY,
+                id INT AUTO_INCREMENT PRIMARY KEY,
                 asset TEXT NOT NULL,
                 amount REAL NOT NULL,
                 date TEXT
@@ -82,14 +100,14 @@ def init_db():
         conn.commit()
         cursor.close()
         conn.close()
-        print("Banco de Dados Conectado e Inicializado!")
+        print("✅ Banco de Dados Inicializado!")
     except Exception as e:
-        print(f"Erro ao conectar no DB: {e}")
+        print(f"❌ Erro ao conectar no DB: {e}")
 
-# Inicializa ao ligar (apenas se tiver URL)
-if DATABASE_URL:
-    init_db()
+# Inicializa
+init_db()
 
+# --- FUNÇÕES AUXILIARES ---
 def enviar_mensagem(chat_id, texto):
     try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": chat_id, "text": texto})
     except: pass
@@ -103,6 +121,7 @@ def detectar_categoria(texto):
     if any(x in texto for x in ["salario", "freela", "venda", "pix"]): return "Renda"
     return "Outros"
 
+# --- ROTAS ---
 @app.post("/login")
 def login(data: LoginData):
     if data.username == ADMIN_USER and data.password == ADMIN_PASS:
@@ -112,11 +131,8 @@ def login(data: LoginData):
 @app.get("/dashboard")
 def get_dashboard(month: str = None):
     if not month: month = datetime.now().strftime("%Y-%m")
+    conn = get_db_connection(); cursor = conn.cursor()
     
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Postgres usa %s em vez de ?
     cursor.execute("SELECT * FROM transactions WHERE date LIKE %s ORDER BY date DESC, id DESC", (f"{month}%",))
     transactions = [{"id": r[0], "description": r[1], "amount": r[2], "date": r[3], "category": r[4]} for r in cursor.fetchall()]
     
@@ -126,8 +142,7 @@ def get_dashboard(month: str = None):
     cursor.execute("SELECT * FROM investments")
     investments_global = [{"id": r[0], "amount": r[2]} for r in cursor.fetchall()]
     
-    cursor.close()
-    conn.close()
+    cursor.close(); conn.close()
     
     ganhos = sum(t["amount"] for t in transactions if t["amount"] > 0)
     gastos = sum(t["amount"] for t in transactions if t["amount"] < 0)
@@ -152,26 +167,20 @@ def get_dashboard(month: str = None):
         "current_month": month
     }
 
-# --- CRIAÇÃO MANUAL ---
 @app.post("/transactions")
 def create_transaction(t: TransactionCreate):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO transactions (description, amount, category, date) VALUES (%s, %s, %s, %s)", 
-                   (t.description, t.amount, t.category, t.date))
+    conn = get_db_connection(); cursor = conn.cursor()
+    cursor.execute("INSERT INTO transactions (description, amount, category, date) VALUES (%s, %s, %s, %s)", (t.description, t.amount, t.category, t.date))
     conn.commit(); cursor.close(); conn.close()
     return {"status": "created"}
 
 @app.post("/investments")
 def create_investment(i: InvestmentCreate):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO investments (asset, amount, date) VALUES (%s, %s, %s)", 
-                   (i.asset, i.amount, i.date))
+    conn = get_db_connection(); cursor = conn.cursor()
+    cursor.execute("INSERT INTO investments (asset, amount, date) VALUES (%s, %s, %s)", (i.asset, i.amount, i.date))
     conn.commit(); cursor.close(); conn.close()
     return {"status": "created"}
 
-# --- UPDATE E DELETE ---
 @app.put("/transactions/{item_id}")
 def update_transaction(item_id: int, t: TransactionUpdate):
     conn = get_db_connection(); cursor = conn.cursor()
@@ -196,7 +205,6 @@ def delete_investment(item_id: int):
     cursor.execute("DELETE FROM investments WHERE id = %s", (item_id,))
     conn.commit(); cursor.close(); conn.close(); return {"status": "deleted"}
 
-# --- TELEGRAM ---
 @app.post("/webhook")
 async def receber_telegram(request: Request):
     data = await request.json()
@@ -207,7 +215,6 @@ async def receber_telegram(request: Request):
         if match:
             valor = float(match.group())
             data_hoje = datetime.now().strftime("%Y-%m-%d")
-            
             try:
                 conn = get_db_connection(); cursor = conn.cursor()
                 if any(x in texto.lower() for x in ["investi", "aporte", "compra"]):
@@ -221,12 +228,9 @@ async def receber_telegram(request: Request):
                     msg = f"{'🚀' if eh_lucro else '💸'} {cat}: {texto}"
                 conn.commit(); cursor.close(); conn.close()
                 enviar_mensagem(chat_id, msg)
-            except Exception as e:
-                enviar_mensagem(chat_id, "Erro no Banco de Dados ⚠️")
-                print(e)
+            except Exception: pass
     return {"ok": True}
 
 if __name__ == "__main__":
-    # Pega a porta do Render ou usa 8000 localmente
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
