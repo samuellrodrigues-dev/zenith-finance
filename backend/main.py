@@ -6,10 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware # <--- O que consertamos ante
 from pydantic import BaseModel # <--- O que estava faltando agora!
 from dotenv import load_dotenv
 from datetime import datetime
-from database import SessionLocal, Transaction
+from database import SessionLocal, Transaction, engine, Base
 import google.generativeai as genai
 
 load_dotenv()
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
