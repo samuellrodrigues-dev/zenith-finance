@@ -33,6 +33,10 @@ ADMIN_PASS = "72163427"
 
 app = FastAPI()
 
+@app.get("/")
+def read_root():
+    return {"message": "Zenith API está online! 🚀"}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
