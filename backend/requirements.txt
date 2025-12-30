@@ -21,3 +21,4 @@ urllib3==2.6.2
 uvicorn==0.40.0
 cryptography
 google-generativeai>=0.7.2
+yfinance

@@ -12,7 +12,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 class Transaction(Base):
-    # MUDAMOS O NOME PARA FORÇAR A CRIAÇÃO DE UMA TABELA NOVA COM A COLUNA DATE
+    # Tabela de Transações (Ganhos e Gastos)
     __tablename__ = "transactions_v2"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -20,4 +20,14 @@ class Transaction(Base):
     amount = Column(Float)
     category = Column(String(255))
     type = Column(String(255))
-    date = Column(String(50)) # <--- AQUI ESTÁ A NOVIDADE!
+    date = Column(String(50))
+
+class Investment(Base):
+    # NOVA TABELA DE INVESTIMENTOS (V2)
+    __tablename__ = "investments_v2"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticker = Column(String(50))  # Ex: PETR4.SA, BTC-USD
+    quantity = Column(Float)     # Ex: 100 ações, 0.5 bitcoin
+    purchase_price = Column(Float) # Quanto pagou na época (opcional, para calcular lucro real)
+    date = Column(String(50))
