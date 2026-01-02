@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float
+from sqlalchemy import create_engine, Column, Integer, String, Float, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
@@ -6,23 +6,30 @@ import os
 # 1. Tenta pegar a URL do ambiente
 db_url = os.getenv("DATABASE_URL")
 
-# 2. Limpeza: Se for None ou Vazio, define como None real
+# Limpeza básica
 if db_url and not db_url.strip():
     db_url = None
-
-# 3. Correção para Postgres no Render (se existir)
-if db_url and db_url.startswith("postgres://"):
+elif db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
-# 4. TENTATIVA DE CONEXÃO BLINDADA
+# 2. TENTATIVA DE CONEXÃO BLINDADA COM TESTE REAL
 try:
     if not db_url:
         raise ValueError("URL vazia")
-    # Tenta criar a engine com a URL oficial
-    engine = create_engine(db_url)
-    print(f"✅ Conectado no banco oficial: {db_url.split('://')[0]}...")
+    
+    # Cria a engine provisória
+    engine_test = create_engine(db_url)
+    
+    # --- O PULO DO GATO: TESTA SE CONECTA DE VERDADE ---
+    with engine_test.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    
+    # Se passou daqui, o banco é real e funciona!
+    engine = engine_test
+    print(f"✅ Conectado no banco oficial: {db_url.split('@')[1].split('/')[0] if '@' in db_url else 'Cloud'}...")
+
 except Exception as e:
-    # SE DER QUALQUER ERRO, USA O SQLITE LOCAL
+    # SE DER QUALQUER ERRO (Endereço errado, banco caiu, senha errada...)
     print(f"⚠️ Erro na conexão ({e}). Usando SQLite local de emergência.")
     db_url = "sqlite:///./finance.db"
     engine = create_engine(db_url, connect_args={"check_same_thread": False})
