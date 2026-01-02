@@ -3,13 +3,14 @@
 import { 
   TrendingDown, Wallet, RefreshCw, Trash2, Zap, TrendingUp, 
   Edit2, Save, X, Calendar, ChevronLeft, ChevronRight, Lock, 
-  Plus, User, Key, ArrowUpRight, ArrowDownRight, CreditCard, Bot, Send, Menu
+  Plus, User, Key, ArrowUpRight, ArrowDownRight, CreditCard, Bot, Send, Menu, Target
 } from 'lucide-react';
 import { useEffect, useState, useRef } from "react";
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { Doughnut } from 'react-chartjs-2';
 import { motion, AnimatePresence } from "framer-motion";
 
+// Registra componentes do gráfico
 ChartJS.register(ArcElement, Tooltip, Legend);
 
 export default function Home() {
@@ -17,9 +18,7 @@ export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [currentDate, setCurrentDate] = useState(new Date()); 
-  
-  // --- ESTADO MOBILE ---
-  const [isMobileOpen, setIsMobileOpen] = useState(false); // Controle do Menu no Celular
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   // --- DADOS DO SISTEMA ---
   const [data, setData] = useState({ 
@@ -32,6 +31,7 @@ export default function Home() {
     categories: {} 
   });
   const [cards, setCards] = useState([]); 
+  const [goals, setGoals] = useState([]); // Array de Metas
   const [loading, setLoading] = useState(true);
 
   // --- ESTADOS DA IA ---
@@ -43,15 +43,19 @@ export default function Home() {
   // --- MODAIS ---
   const [showModal, setShowModal] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false); 
+  const [showGoalModal, setShowGoalModal] = useState(false); // Modal Criar Meta
+  const [showDepositModal, setShowDepositModal] = useState<{show: boolean, goalId: number | null, current: number}>({
+    show: false, goalId: null, current: 0
+  }); // Modal Depositar na Meta
 
-  // --- NOVO ITEM ---
+  // --- INPUTS (Novos Registros) ---
   const [newItem, setNewItem] = useState({ 
       type: 'expense', desc: '', amount: '', price: '', cat: 'Outros',
       paymentMethod: 'cash', cardId: ''             
   });
-
-  // --- NOVO CARTÃO ---
   const [newCard, setNewCard] = useState({ name: '', limit: '' });
+  const [newGoal, setNewGoal] = useState({ name: '', target: '', current: '', deadline: '' });
+  const [depositAmount, setDepositAmount] = useState("");
 
   // --- ESTADOS DE EDIÇÃO ---
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -60,6 +64,7 @@ export default function Home() {
   const [editPrice, setEditPrice] = useState("");
   const [editCat, setEditCat] = useState("");
 
+  // Helper para formatar data YYYY-MM
   const getMonthStr = (date: Date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -70,19 +75,24 @@ export default function Home() {
   const fetchDashboard = async () => {
     try {
       if (!editingId && isAuthenticated) {
+        // 1. Dashboard e Investimentos
         const resDash = await fetch(`https://zenith-finance-1.onrender.com/dashboard?month=${getMonthStr(currentDate)}`);
-        const jsonDash = await resDash.json();
-        setData(jsonDash);
+        setData(await resDash.json());
         
+        // 2. Cartões
         const resCards = await fetch(`https://zenith-finance-1.onrender.com/cards`);
-        const jsonCards = await resCards.json();
-        setCards(jsonCards);
+        setCards(await resCards.json());
+
+        // 3. Metas (Goals)
+        const resGoals = await fetch(`https://zenith-finance-1.onrender.com/goals`);
+        setGoals(await resGoals.json());
+
         setLoading(false);
       }
     } catch (error) { console.error(error); }
   };
 
-  // --- CHAT IA ---
+  // --- IA: ENVIAR MENSAGEM ---
   const handleSendMessage = async (e: any) => {
     e.preventDefault();
     if(!chatInput.trim()) return;
@@ -106,10 +116,9 @@ export default function Home() {
     setAiLoading(false);
   };
 
-  useEffect(() => { 
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); 
-  }, [chatHistory]);
-
+  // Efeitos (Scroll Chat e Auto-Refresh)
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatHistory]);
+  
   useEffect(() => { 
     if(isAuthenticated) { 
         fetchDashboard(); 
@@ -125,7 +134,50 @@ export default function Home() {
     setLoading(true);
   };
 
-  // --- AÇÕES CRUD ---
+  // --- AÇÕES CRUD (CRIAR/DELETAR) ---
+
+  // Criar Meta
+  const handleCreateGoal = async (e: any) => {
+    e.preventDefault();
+    await fetch('https://zenith-finance-1.onrender.com/goals', {
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ 
+            name: newGoal.name, 
+            target: parseFloat(newGoal.target), 
+            current: parseFloat(newGoal.current || "0"), 
+            deadline: newGoal.deadline 
+        })
+    });
+    setShowGoalModal(false); 
+    setNewGoal({name:'', target:'', current:'', deadline:''}); 
+    fetchDashboard();
+  }
+
+  // Depositar em Meta
+  const handleDepositGoal = async (e: any) => {
+    e.preventDefault();
+    if (!showDepositModal.goalId) return;
+    const newTotal = showDepositModal.current + parseFloat(depositAmount);
+    
+    await fetch(`https://zenith-finance-1.onrender.com/goals/${showDepositModal.goalId}`, {
+        method: 'PUT', 
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ current: newTotal })
+    });
+    setShowDepositModal({show: false, goalId: null, current: 0}); 
+    setDepositAmount(""); 
+    fetchDashboard();
+  }
+  
+  // Deletar Meta
+  const deleteGoal = async (id: number) => {
+     if(!confirm("Excluir meta?")) return;
+     await fetch(`https://zenith-finance-1.onrender.com/goals/${id}`, { method: 'DELETE' }); 
+     fetchDashboard();
+  }
+
+  // Criar Cartão
   const handleCreateCard = async (e: any) => {
     e.preventDefault();
     await fetch('https://zenith-finance-1.onrender.com/cards', {
@@ -138,6 +190,7 @@ export default function Home() {
     fetchDashboard();
   }
   
+  // Criar Transação/Investimento
   const handleCreate = async (e: any) => {
     e.preventDefault(); 
     const dateStr = `${getMonthStr(currentDate)}-01`; 
@@ -181,6 +234,7 @@ export default function Home() {
     fetchDashboard(); 
   };
 
+  // --- EDIÇÃO (Simples) ---
   const startEditing = (item: any, type: string) => { 
     setEditingId(item.id); 
     if (type === 'investments') { 
@@ -211,11 +265,7 @@ export default function Home() {
     fetchDashboard(); 
   };
 
-  // --- NAVEGAÇÃO MOBILE INTELIGENTE ---
-  const navigate = (tab: string) => {
-    setActiveTab(tab);
-    setIsMobileOpen(false); // Fecha o menu ao clicar
-  }
+  const navigate = (tab: string) => { setActiveTab(tab); setIsMobileOpen(false); }
 
   if (!isAuthenticated) return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
 
@@ -224,18 +274,16 @@ export default function Home() {
     datasets: [{ 
         data: Object.values(data.categories), 
         backgroundColor: ['#ff0055', '#00f3ff', '#00ff9f', '#fcee0a', '#bc13fe'], 
-        borderColor: '#000', 
-        borderWidth: 2 
+        borderColor: '#000', borderWidth: 2 
     }], 
   };
-  
   const totalProfit = data.portfolio_value - data.invested_total; 
   const isProfit = totalProfit >= 0;
 
   return (
     <main className="min-h-screen font-sans bg-cyber-darkest text-white md:pl-64 transition-all duration-300" style={{ fontFamily: 'var(--font-rajdhani)' }}>
       
-      {/* --- HEADER MOBILE (SÓ APARECE NO CELULAR) --- */}
+      {/* HEADER MOBILE */}
       <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-cyber-dark border-b border-white/10 flex items-center justify-between px-4 z-40 shadow-lg">
          <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-cyber-blue rounded flex items-center justify-center"><Zap size={18} className="text-black"/></div>
@@ -244,10 +292,9 @@ export default function Home() {
          <button onClick={() => setIsMobileOpen(!isMobileOpen)} className="p-2 text-white hover:text-cyber-blue"><Menu size={28}/></button>
       </div>
 
-      {/* --- OVERLAY (FUNDO PRETO QUANDO MENU ABRE) --- */}
       {isMobileOpen && <div onClick={()=>setIsMobileOpen(false)} className="fixed inset-0 bg-black/80 z-40 md:hidden backdrop-blur-sm" />}
 
-      {/* --- SIDEBAR RESPONSIVA --- */}
+      {/* SIDEBAR */}
       <aside className={`fixed inset-y-0 left-0 w-64 bg-cyber-dark border-r border-white/5 flex flex-col p-6 z-50 transform transition-transform duration-300 ease-in-out md:translate-x-0 ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center gap-3 mb-10">
             <div className="w-10 h-10 bg-cyber-blue rounded-lg flex items-center justify-center shadow-[0_0_15px_#00f3ff]"><Zap size={24} className="text-black" /></div>
@@ -257,15 +304,15 @@ export default function Home() {
             <SidebarBtn icon={<Wallet size={20}/>} label="Dashboard" active={activeTab==='dashboard'} onClick={()=>navigate('dashboard')}/>
             <SidebarBtn icon={<TrendingUp size={20}/>} label="Investimentos" active={activeTab==='investments'} onClick={()=>navigate('investments')}/>
             <SidebarBtn icon={<CreditCard size={20}/>} label="Cartões" active={activeTab==='cards'} onClick={()=>navigate('cards')}/>
+            <SidebarBtn icon={<Target size={20}/>} label="Metas" active={activeTab==='goals'} onClick={()=>navigate('goals')}/>
             <SidebarBtn icon={<Bot size={20}/>} label="AI Advisor" active={activeTab==='ai'} onClick={()=>navigate('ai')}/>
             <SidebarBtn icon={<RefreshCw size={20}/>} label="Relatórios" active={activeTab==='reports'} onClick={()=>navigate('reports')}/>
         </nav>
-        <div className="mt-auto pt-6 border-t border-white/10 text-center text-xs text-gray-600 font-mono">
-            V 3.0 // MOBILE READY
-        </div>
       </aside>
       
-      {/* MODAL TRANSAÇÃO */}
+      {/* --- MODAIS --- */}
+
+      {/* MODAL GASTO/INVESTIMENTO */}
       {showModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4">
             <motion.div initial={{scale:0.9}} animate={{scale:1}} className="bg-cyber-dark p-6 md:p-8 rounded-2xl border border-cyber-blue w-full max-w-md shadow-[0_0_50px_rgba(0,243,255,0.2)]">
@@ -279,12 +326,10 @@ export default function Home() {
                             <option value="investment">📈 Investimento</option>
                         </select>
                     </div>
+
                     {newItem.type === 'investment' ? (
                         <>
-                            <div>
-                                <label className="text-xs text-cyber-green font-bold tracking-widest block mb-1">TICKER</label>
-                                <input required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white uppercase" value={newItem.desc} onChange={e=>setNewItem({...newItem, desc: e.target.value.toUpperCase()})} placeholder="PETR4.SA" />
-                            </div>
+                            <div><label className="text-xs text-cyber-green font-bold tracking-widest block mb-1">TICKER</label><input required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white uppercase" value={newItem.desc} onChange={e=>setNewItem({...newItem, desc: e.target.value.toUpperCase()})} placeholder="PETR4.SA" /></div>
                             <div className="flex gap-2">
                                 <input required type="number" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.amount} onChange={e=>setNewItem({...newItem, amount: e.target.value})} placeholder="Qtd" />
                                 <input required type="number" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.price} onChange={e=>setNewItem({...newItem, price: e.target.value})} placeholder="Preço" />
@@ -292,51 +337,18 @@ export default function Home() {
                         </>
                     ) : (
                         <>
-                            <div>
-                                <label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">DESCRIÇÃO</label>
-                                <input required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.desc} onChange={e=>setNewItem({...newItem, desc: e.target.value})} />
-                            </div>
-                            <div>
-                                <label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">VALOR (R$)</label>
-                                <input required type="number" step="0.01" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.amount} onChange={e=>setNewItem({...newItem, amount: e.target.value})} />
-                            </div>
+                            <div><label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">DESCRIÇÃO</label><input required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.desc} onChange={e=>setNewItem({...newItem, desc: e.target.value})} /></div>
+                            <div><label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">VALOR (R$)</label><input required type="number" step="0.01" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.amount} onChange={e=>setNewItem({...newItem, amount: e.target.value})} /></div>
                             {newItem.type === 'expense' && (
                                 <>
-                                    <div>
-                                        <label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">PAGAMENTO</label>
-                                        <select className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.paymentMethod} onChange={e=>setNewItem({...newItem, paymentMethod: e.target.value})}>
-                                            <option value="cash">💵 Dinheiro / Pix</option>
-                                            <option value="credit">💳 Cartão de Crédito</option>
-                                        </select>
-                                    </div>
-                                    {newItem.paymentMethod === 'credit' && (
-                                        <div>
-                                            <label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">CARTÃO</label>
-                                            <select required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.cardId} onChange={e=>setNewItem({...newItem, cardId: e.target.value})}>
-                                                <option value="">Selecione...</option>
-                                                {cards.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                            </select>
-                                        </div>
-                                    )}
-                                    <div>
-                                        <label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">CATEGORIA</label>
-                                        <select className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.cat} onChange={e=>setNewItem({...newItem, cat: e.target.value})}>
-                                            <option>Alimentação</option>
-                                            <option>Transporte</option>
-                                            <option>Casa</option>
-                                            <option>Lazer</option>
-                                            <option>Renda</option>
-                                            <option>Outros</option>
-                                        </select>
-                                    </div>
+                                    <div><label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">PAGAMENTO</label><select className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.paymentMethod} onChange={e=>setNewItem({...newItem, paymentMethod: e.target.value})}><option value="cash">💵 Dinheiro / Pix</option><option value="credit">💳 Cartão de Crédito</option></select></div>
+                                    {newItem.paymentMethod === 'credit' && (<div><label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">CARTÃO</label><select required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.cardId} onChange={e=>setNewItem({...newItem, cardId: e.target.value})}><option value="">Selecione...</option>{cards.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>)}
+                                    <div><label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">CATEGORIA</label><select className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newItem.cat} onChange={e=>setNewItem({...newItem, cat: e.target.value})}><option>Alimentação</option><option>Transporte</option><option>Casa</option><option>Lazer</option><option>Renda</option><option>Outros</option></select></div>
                                 </>
                             )}
                         </>
                     )}
-                    <div className="flex gap-3 mt-6">
-                        <button type="button" onClick={()=>setShowModal(false)} className="flex-1 py-3 rounded bg-white/5 hover:bg-white/10 text-gray-400 font-bold">CANCELAR</button>
-                        <button type="submit" className="flex-1 py-3 rounded bg-cyber-blue text-black font-bold">SALVAR</button>
-                    </div>
+                    <div className="flex gap-3 mt-6"><button type="button" onClick={()=>setShowModal(false)} className="flex-1 py-3 rounded bg-white/5 hover:bg-white/10 text-gray-400 font-bold">CANCELAR</button><button type="submit" className="flex-1 py-3 rounded bg-cyber-blue text-black font-bold">SALVAR</button></div>
                 </form>
             </motion.div>
         </div>
@@ -348,17 +360,43 @@ export default function Home() {
             <motion.div initial={{scale:0.9}} animate={{scale:1}} className="bg-cyber-dark p-8 rounded-2xl border border-cyber-blue w-full max-w-md">
                 <h3 className="text-xl font-bold text-white mb-6 font-orbitron text-center">NOVO CARTÃO</h3>
                 <form onSubmit={handleCreateCard} className="space-y-4">
+                    <div><label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">NOME</label><input required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newCard.name} onChange={e=>setNewCard({...newCard, name: e.target.value})} placeholder="Ex: Nubank" /></div>
+                    <div><label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">LIMITE (R$)</label><input required type="number" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newCard.limit} onChange={e=>setNewCard({...newCard, limit: e.target.value})} /></div>
+                    <div className="flex gap-3 mt-6"><button type="button" onClick={()=>setShowCardModal(false)} className="flex-1 py-3 rounded bg-white/5 hover:bg-white/10 text-gray-400 font-bold">CANCELAR</button><button type="submit" className="flex-1 py-3 rounded bg-cyber-blue text-black font-bold">CRIAR</button></div>
+                </form>
+            </motion.div>
+        </div>
+      )}
+
+      {/* MODAL NOVA META */}
+      {showGoalModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4">
+            <motion.div initial={{scale:0.9}} animate={{scale:1}} className="bg-cyber-dark p-8 rounded-2xl border border-cyber-green w-full max-w-md">
+                <h3 className="text-xl font-bold text-white mb-6 font-orbitron text-center">NOVA META</h3>
+                <form onSubmit={handleCreateGoal} className="space-y-4">
+                    <div><label className="text-xs text-cyber-green font-bold tracking-widest block mb-1">NOME DA META</label><input required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newGoal.name} onChange={e=>setNewGoal({...newGoal, name: e.target.value})} placeholder="Ex: Viagem Europa" /></div>
+                    <div><label className="text-xs text-cyber-green font-bold tracking-widest block mb-1">VALOR ALVO (R$)</label><input required type="number" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newGoal.target} onChange={e=>setNewGoal({...newGoal, target: e.target.value})} placeholder="20000" /></div>
+                    <div><label className="text-xs text-cyber-green font-bold tracking-widest block mb-1">JÁ GUARDADO (R$)</label><input required type="number" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newGoal.current} onChange={e=>setNewGoal({...newGoal, current: e.target.value})} placeholder="1000" /></div>
+                    <div><label className="text-xs text-cyber-green font-bold tracking-widest block mb-1">DATA ALVO</label><input required type="date" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newGoal.deadline} onChange={e=>setNewGoal({...newGoal, deadline: e.target.value})} /></div>
+                    <div className="flex gap-3 mt-6"><button type="button" onClick={()=>setShowGoalModal(false)} className="flex-1 py-3 rounded bg-white/5 hover:bg-white/10 text-gray-400 font-bold">CANCELAR</button><button type="submit" className="flex-1 py-3 rounded bg-cyber-green text-black font-bold">CRIAR</button></div>
+                </form>
+            </motion.div>
+        </div>
+      )}
+
+      {/* MODAL DEPOSITAR EM META */}
+      {showDepositModal.show && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4">
+            <motion.div initial={{scale:0.9}} animate={{scale:1}} className="bg-cyber-dark p-8 rounded-2xl border border-cyber-green w-full max-w-sm">
+                <h3 className="text-xl font-bold text-white mb-6 font-orbitron text-center">ADICIONAR ECONOMIA</h3>
+                <form onSubmit={handleDepositGoal} className="space-y-4">
                     <div>
-                        <label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">NOME</label>
-                        <input required className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newCard.name} onChange={e=>setNewCard({...newCard, name: e.target.value})} placeholder="Ex: Nubank" />
-                    </div>
-                    <div>
-                        <label className="text-xs text-cyber-blue font-bold tracking-widest block mb-1">LIMITE (R$)</label>
-                        <input required type="number" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white" value={newCard.limit} onChange={e=>setNewCard({...newCard, limit: e.target.value})} />
+                        <label className="text-xs text-cyber-green font-bold tracking-widest block mb-1">VALOR PARA GUARDAR (R$)</label>
+                        <input required autoFocus type="number" className="w-full bg-black/50 border border-white/20 rounded p-3 text-white text-2xl text-center" value={depositAmount} onChange={e=>setDepositAmount(e.target.value)} placeholder="0.00" />
                     </div>
                     <div className="flex gap-3 mt-6">
-                        <button type="button" onClick={()=>setShowCardModal(false)} className="flex-1 py-3 rounded bg-white/5 hover:bg-white/10 text-gray-400 font-bold">CANCELAR</button>
-                        <button type="submit" className="flex-1 py-3 rounded bg-cyber-blue text-black font-bold">CRIAR</button>
+                        <button type="button" onClick={()=>setShowDepositModal({show:false, goalId:null, current:0})} className="flex-1 py-3 rounded bg-white/5 hover:bg-white/10 text-gray-400 font-bold">CANCELAR</button>
+                        <button type="submit" className="flex-1 py-3 rounded bg-cyber-green text-black font-bold">DEPOSITAR</button>
                     </div>
                 </form>
             </motion.div>
@@ -367,7 +405,7 @@ export default function Home() {
 
       <div className="p-4 md:p-10 pt-20 md:pt-10 max-w-7xl mx-auto space-y-8">
         
-        {/* HEADER DA PÁGINA (Desktop e Mobile) */}
+        {/* HEADER DA PÁGINA */}
         {activeTab !== 'ai' && (
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-white/5 pb-6 gap-4">
                 <div>
@@ -387,6 +425,10 @@ export default function Home() {
                         <button onClick={()=>setShowCardModal(true)} className="flex-1 md:flex-none flex justify-center items-center gap-2 px-6 py-2 bg-cyber-green/10 border border-cyber-green text-cyber-green rounded hover:bg-cyber-green hover:text-black font-bold tracking-widest text-xs uppercase">
                             <Plus size={16}/> CARTÃO
                         </button>
+                    ) : activeTab === 'goals' ? (
+                        <button onClick={()=>setShowGoalModal(true)} className="flex-1 md:flex-none flex justify-center items-center gap-2 px-6 py-2 bg-cyber-green/10 border border-cyber-green text-cyber-green rounded hover:bg-cyber-green hover:text-black font-bold tracking-widest text-xs uppercase">
+                            <Plus size={16}/> META
+                        </button>
                     ) : (
                         <button onClick={()=>setShowModal(true)} className="flex-1 md:flex-none flex justify-center items-center gap-2 px-6 py-2 bg-cyber-green/10 border border-cyber-green text-cyber-green rounded hover:bg-cyber-green hover:text-black font-bold tracking-widest text-xs uppercase">
                             <Plus size={16}/> NOVO
@@ -403,15 +445,13 @@ export default function Home() {
         {activeTab === 'dashboard' && (
           <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-8">
-              <NeonCard icon={<Wallet size={32} />} label="Saldo Líquido" value={data.balance} color="blue" />
-              <NeonCard icon={<TrendingDown size={32} />} label="Gastos do Mês" value={data.expenses} color="red" />
-              <NeonCard icon={<TrendingUp size={32} />} label="Patrimônio" value={data.portfolio_value} color="green" />
+                <NeonCard icon={<Wallet size={32} />} label="Saldo Líquido" value={data.balance} color="blue" />
+                <NeonCard icon={<TrendingDown size={32} />} label="Gastos do Mês" value={data.expenses} color="red" />
+                <NeonCard icon={<TrendingUp size={32} />} label="Patrimônio" value={data.portfolio_value} color="green" />
             </div>
             
             <div className="rounded-xl border border-white/10 bg-cyber-dark/40 backdrop-blur-md overflow-hidden">
-              <div className="p-6 border-b border-white/5 bg-white/5 flex justify-between items-center">
-                  <h3 className="text-lg md:text-xl text-white font-bold tracking-wide flex items-center gap-2"><Zap className="text-cyber-yellow"/> Transações Recentes</h3>
-              </div>
+              <div className="p-6 border-b border-white/5 bg-white/5 flex justify-between items-center"><h3 className="text-lg md:text-xl text-white font-bold tracking-wide flex items-center gap-2"><Zap className="text-cyber-yellow"/> Transações Recentes</h3></div>
               <div className="max-h-[400px] overflow-y-auto">
                 {data.transactions.map((t: any) => (
                     <div key={t.id} className={`flex justify-between items-center p-4 border-b border-white/5 hover:bg-white/5 transition-colors ${editingId === t.id ? 'bg-cyber-blue/10' : ''}`}>
@@ -447,27 +487,53 @@ export default function Home() {
           </div>
         )}
 
-        {/* --- ABA INVESTIMENTOS (COMPLETA) --- */}
+        {/* --- ABA METAS (GOALS) --- */}
+        {activeTab === 'goals' && (
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {goals.length === 0 && <div className="text-gray-500 col-span-2 text-center p-10">Nenhuma meta definida. Clique em "META" para começar! 🚀</div>}
+                {goals.map((g: any) => {
+                    const pct = Math.min((g.current_amount / g.target_amount) * 100, 100);
+                    return (
+                        <div key={g.id} className="bg-cyber-dark border border-white/10 rounded-2xl p-6 relative overflow-hidden group hover:border-cyber-green/50 transition-all">
+                            <div className="flex justify-between items-start mb-4 relative z-10">
+                                <div>
+                                    <h3 className="text-xl font-bold text-white tracking-wide">{g.name}</h3>
+                                    <p className="text-xs text-gray-400 mt-1">Alvo: {new Date(g.deadline).toLocaleDateString('pt-BR')}</p>
+                                </div>
+                                <button onClick={()=>deleteGoal(g.id)} className="text-gray-500 hover:text-red-500"><Trash2 size={18}/></button>
+                            </div>
+                            
+                            <div className="flex justify-between items-end mb-2 relative z-10">
+                                <div><span className="text-2xl font-bold font-mono text-cyber-green">{g.current_amount.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}</span></div>
+                                <div className="text-xs text-gray-400 font-mono">de {g.target_amount.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}</div>
+                            </div>
+                            
+                            <div className="h-4 bg-black/50 rounded-full overflow-hidden border border-white/5 mb-6 relative z-10">
+                                <div className="h-full bg-gradient-to-r from-green-600 to-cyber-green transition-all duration-1000" style={{width: `${pct}%`}}></div>
+                            </div>
+
+                            <button onClick={()=>setShowDepositModal({show: true, goalId: g.id, current: g.current_amount})} className="w-full py-3 rounded bg-cyber-green/10 border border-cyber-green text-cyber-green font-bold hover:bg-cyber-green hover:text-black transition-all flex items-center justify-center gap-2 relative z-10">
+                                <Plus size={18}/> DEPOSITAR
+                            </button>
+                            <Target className="absolute -bottom-4 -right-4 text-cyber-green/5 w-32 h-32" />
+                        </div>
+                    )
+                })}
+             </div>
+        )}
+
+        {/* --- ABA INVESTIMENTOS --- */}
         {activeTab === 'investments' && (
           <div className="space-y-8">
             <div className={`p-6 md:p-8 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between shadow-lg gap-6 transition-colors duration-500 ${isProfit ? 'bg-green-900/10 border-green-500/30' : 'bg-red-900/10 border-red-500/30'}`}>
                 <div>
                     <h2 className="text-xl md:text-2xl font-bold text-white mb-4 tracking-wide flex items-center gap-2"><Wallet className="text-cyber-blue"/> PERFORMANCE</h2>
                     <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-8">
-                        <div>
-                            <p className="text-gray-400 text-[10px] font-bold tracking-widest uppercase mb-1">CUSTO TOTAL</p>
-                            <p className="text-xl md:text-2xl font-mono text-gray-300">{data.invested_total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-                        </div>
-                        <div className={`px-4 py-2 rounded border ${isProfit ? 'bg-green-500/10 border-green-500/50' : 'bg-red-500/10 border-red-500/50'}`}>
-                            <p className={`text-[10px] font-bold tracking-widest uppercase mb-1 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>{isProfit ? 'LUCRO' : 'PREJUÍZO'}</p>
-                            <p className={`text-lg md:text-xl font-mono font-bold ${isProfit ? 'text-green-300' : 'text-red-300'}`}>{Math.abs(totalProfit).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-                        </div>
+                        <div><p className="text-gray-400 text-[10px] font-bold tracking-widest uppercase mb-1">CUSTO TOTAL</p><p className="text-xl md:text-2xl font-mono text-gray-300">{data.invested_total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
+                        <div className={`px-4 py-2 rounded border ${isProfit ? 'bg-green-500/10 border-green-500/50' : 'bg-red-500/10 border-red-500/50'}`}><p className={`text-[10px] font-bold tracking-widest uppercase mb-1 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>{isProfit ? 'LUCRO' : 'PREJUÍZO'}</p><p className={`text-lg md:text-xl font-mono font-bold ${isProfit ? 'text-green-300' : 'text-red-300'}`}>{Math.abs(totalProfit).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
                     </div>
                 </div>
-                <div className="text-left md:text-right w-full md:w-auto">
-                    <p className="text-cyber-blue text-xs font-bold tracking-widest uppercase mb-1 animate-pulse">VALOR ATUAL</p>
-                    <div className="text-4xl md:text-5xl font-bold text-white font-mono drop-shadow-[0_0_15px_rgba(0,243,255,0.3)]">{data.portfolio_value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
-                </div>
+                <div className="text-left md:text-right w-full md:w-auto"><p className="text-cyber-blue text-xs font-bold tracking-widest uppercase mb-1 animate-pulse">VALOR ATUAL</p><div className="text-4xl md:text-5xl font-bold text-white font-mono drop-shadow-[0_0_15px_rgba(0,243,255,0.3)]">{data.portfolio_value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div></div>
             </div>
 
             <div className="rounded-xl border border-white/10 bg-cyber-dark/40 backdrop-blur-md overflow-hidden">
@@ -550,7 +616,13 @@ export default function Home() {
                  </div>
                  <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
                     {chatHistory.length === 0 && (<div className="text-center text-gray-500 mt-20"><Bot size={48} className="mx-auto mb-4 opacity-20"/><p>Olá! Sou sua inteligência financeira.</p><p className="text-sm">Pergunte: "Quanto gastei com Uber?" ou "Como estão meus investimentos?"</p></div>)}
-                    {chatHistory.map((msg, i) => (<div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] md:max-w-[80%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-cyber-blue/10 border border-cyber-blue/30 text-white rounded-tr-none' : 'bg-white/5 border border-white/10 text-gray-200 rounded-tl-none'}`}><p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p></div></div>))}
+                    {chatHistory.map((msg, i) => (
+                        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[85%] md:max-w-[80%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-cyber-blue/10 border border-cyber-blue/30 text-white rounded-tr-none' : 'bg-white/5 border border-white/10 text-gray-200 rounded-tl-none'}`}>
+                                <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                            </div>
+                        </div>
+                    ))}
                     {aiLoading && <div className="text-gray-500 text-xs animate-pulse ml-4">Zenith está digitando...</div>}
                     <div ref={chatEndRef} />
                  </div>
@@ -578,9 +650,11 @@ export default function Home() {
   );
 }
 
-// --- COMPONENTES AUXILIARES EXPANDIDOS ---
+// ==========================================
+// COMPONENTES VISUAIS AUXILIARES (Expandidos)
+// ==========================================
 
-function SidebarBtn({icon, label, active, onClick}:any) {
+function SidebarBtn({icon, label, active, onClick}: any) {
     return (
         <button 
             onClick={onClick} 
